@@ -105,5 +105,14 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@types/node": "^22.19.0"
+  },
+  "author": "Asaiuta <asaiuta@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Asaiuta/dsh-session-hub.git"
+  },
+  "homepage": "https://github.com/Asaiuta/dsh-session-hub",
+  "bugs": {
+    "url": "https://github.com/Asaiuta/dsh-session-hub/issues"
   }
 }
