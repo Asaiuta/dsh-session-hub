@@ -1,0 +1,6 @@
+# dsh-session-hub bundle patch: mount the host plugin under its package
+# name, resolved through the profile's node_modules (the healed mirror makes
+# every bundle dependency resolvable to bare rows).
+- insert:
+    - id: dsh-session-hub
+      name: dsh-session-hub

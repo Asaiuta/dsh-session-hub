@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "WebWorker"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/*": [
+        "stubs/@deepseek-ai/*"
+      ]
+    },
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}
