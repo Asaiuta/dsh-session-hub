@@ -21,7 +21,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import { createHubEventsRoute } from './hub/events.ts'
 import { GATEWAY_METHODS, HubGateway } from './hub/gateway.ts'
 import { ModelSyncService } from './hub/model-sync.ts'
-import { ImportStore } from './hub/importer.ts'
+import { IMPORT_SOURCES, ImportStore, sourcePath } from './hub/importer.ts'
+import { ImportWatcher } from './hub/import-watch.ts'
 import { ServerRegistry } from './hub/registry.ts'
 import { SessionHubRuntime } from './runtime.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
@@ -124,12 +125,34 @@ export function apply(ctx: Context, config?: Config): void {
       console.warn('[dsh-session-hub] importer load failed:', error)
     })
     ctx.effect(() => {
+      // Live-tail: all three tools append to their logs while the conversation
+      // is still going, so watching the log roots turns the importer from a
+      // historical archive into a live view. The watcher only signals "this
+      // changed" — parsing stays on the existing mtime-incremental path, so a
+      // watch failure degrades to the periodic scan instead of breaking.
+      const watcher = new ImportWatcher(() => {
+        const auto = importStore.autoSources()
+        if (auto.length === 0) return
+        void importStore.rescan(auto).catch(() => {})
+      })
+      importStore.attachWatcher(watcher)
+      for (const source of IMPORT_SOURCES) watcher.add(sourcePath(source))
+      // opencode is SQLite in WAL mode: writes land in the -wal sidecar
+      // first, so watching only the main db file misses live activity.
+      watcher.add(`${sourcePath('opencode')}-wal`)
+
+      // The periodic sweep stays as the safety net for what watching cannot
+      // see: platforms where fs.watch is unavailable, network/virtual mounts
+      // that drop events, and files written before the watcher started.
       const timer = setInterval(() => {
         const auto = importStore.autoSources()
         if (auto.length === 0) return
         void importStore.rescan(auto).catch(() => {})
       }, 60_000)
-      return () => clearInterval(timer)
+      return () => {
+        clearInterval(timer)
+        watcher.dispose()
+      }
     }, 'dsh-session-hub: importer watcher')
   }
 
@@ -233,6 +256,42 @@ export function apply(ctx: Context, config?: Config): void {
       }, 1500)
       return () => clearInterval(timer)
     }, 'dsh-session-hub: virtual workspace frame watcher')
+  }
+
+  // Imported-session liveness: the official tree learns a session started or
+  // stopped running from `host/session-status`, never by re-polling
+  // session.list. Without this the running dot set at import time would stay
+  // frozen until the user reloads the page — the same class of bug as host
+  // frames being routed into the mux entry.
+  if (importStore !== undefined) {
+    ctx.effect(() => {
+      let last = new Set<string>()
+      const timer = setInterval(() => {
+        const current = new Set(
+          importStore.rows().filter(row => row.running).map(row => String(row.sessionId)),
+        )
+        for (const id of current) {
+          if (!last.has(id)) {
+            registry.events.publish(id as never, 'hub:imported', {
+              type: 'host/session-status',
+              sessionId: id,
+              running: true,
+            })
+          }
+        }
+        for (const id of last) {
+          if (!current.has(id)) {
+            registry.events.publish(id as never, 'hub:imported', {
+              type: 'host/session-status',
+              sessionId: id,
+              running: false,
+            })
+          }
+        }
+        last = current
+      }, 2000)
+      return () => clearInterval(timer)
+    }, 'dsh-session-hub: imported session status watcher')
   }
 
   // Strict endpoint registration: the gateway resolves sessionHub/<method>

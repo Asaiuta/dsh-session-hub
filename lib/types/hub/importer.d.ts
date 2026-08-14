@@ -1,5 +1,6 @@
 import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy';
 import { type ImportedSession } from './import-common.ts';
+import { ImportWatcher } from './import-watch.ts';
 /**
  * The path an imported session groups under.
  *
@@ -49,7 +50,17 @@ export declare class ImportStore {
     private scanning;
     /** Memoized project-directory existence, keyed by normalized path. */
     private readonly dirCache;
+    /** Live-tail watcher, attached by the plugin when the importer is on. */
+    private watcher;
+    /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
+    private dbLive;
     constructor(dataFile: string);
+    /**
+     * Attach the live-tail watcher. Kept out of the constructor so the store
+     * still works (as a plain historical importer) when watching is impossible.
+     * @param watcher - the watcher whose write records drive `running`.
+     */
+    attachWatcher(watcher: ImportWatcher): void;
     /**
      * Restore the persisted cache. Scanning is deliberately not part of load:
      * importing is a user decision, so nothing is read from the source tools
@@ -155,6 +166,18 @@ export declare class ImportStore {
     private projectExists;
     /** Hub session rows for the merged session.list. */
     rows(): SessionSummary[];
+    /**
+     * Whether this imported session's log is being written to right now.
+     *
+     * Liveness comes from the log file itself, not from the tool: all three
+     * tools append while the conversation is still going, so a recent write is
+     * the only evidence available — and the only one that needs no cooperation
+     * from the tool. Sessions with no `sourceFile` (opencode is db-backed) fall
+     * back to the db-level signal.
+     * @param s - the imported session to test.
+     * @returns true when its log was written within the activity window.
+     */
+    private isLive;
     /**
      * Assign every imported session to a workspace, given the official
      * workspace paths.
