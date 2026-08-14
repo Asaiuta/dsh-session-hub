@@ -48,6 +48,22 @@ export interface Config {
    * only (SSH-tunnel deployments need nothing here).
    */
   trustedHosts?: string[]
+  /**
+   * Which halves of the plugin actually run. Everything is on by default —
+   * this exists so a deployment that only wants one of them does not pay for
+   * the rest: a disabled feature is never constructed, never scans, never
+   * registers a route, and never shows up in the settings tab.
+   */
+  features?: {
+    /** Merge remote servers into the official tree (the gateway). */
+    aggregate?: boolean
+    /** Open and supervise SSH tunnels for server entries. */
+    tunnel?: boolean
+    /** Push local llm-* settings to connected servers. */
+    modelSync?: boolean
+    /** Surface Codex / Claude Code / opencode logs as sessions. */
+    importer?: boolean
+  }
 }
 
 /**
@@ -59,6 +75,12 @@ export const Config = z.object({
   // schemastery 3.x: fields are optional unless marked `.required()`.
   dataFile: z.string(),
   trustedHosts: z.array(z.string()),
+  features: z.object({
+    aggregate: z.boolean().default(true),
+    tunnel: z.boolean().default(true),
+    modelSync: z.boolean().default(true),
+    importer: z.boolean().default(true),
+  }).default({}),
 })
 
 /**
@@ -71,9 +93,18 @@ export function apply(ctx: Context, config?: Config): void {
   const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   const dataFile = resolved.dataFile ?? join(dshHome, 'plugins', 'dsh-session-hub.json')
 
-  const registry = new ServerRegistry(dataFile)
+  const features = resolved.features ?? {}
+  const useAggregate = features.aggregate !== false
+  const useTunnel = features.tunnel !== false
+  const useModelSync = features.modelSync !== false
+  const useImporter = features.importer !== false
+
+  const registry = new ServerRegistry(dataFile, { tunnels: useTunnel })
+  registry.features = {
+    aggregate: useAggregate, tunnel: useTunnel, modelSync: useModelSync, importer: useImporter,
+  }
   const official = () => ctx.get('apiProxy') as import('@deepseek-ai/dsh-host-apiproxy').ApiProxy
-  const modelSync = new ModelSyncService(official, registry, dshHome)
+  const modelSync = useModelSync ? new ModelSyncService(official, registry, dshHome) : undefined
 
   // External-tool session importer (codex / claude / opencode): parsed logs
   // surface as read-only sessions in the official tree, matched into local
@@ -81,74 +112,59 @@ export function apply(ctx: Context, config?: Config): void {
   // Settings → Plugins → Session Hub; only sources the user also asked to
   // follow are re-scanned here (incremental, by mtime).
   const importsFile = join(dshHome, 'plugins', 'dsh-session-hub-imports.json')
-  const importStore = new ImportStore(importsFile)
+  // Disabled means absent, not idle: no store, so nothing reads the cache
+  // file, nothing walks a log directory, and the merge paths in the gateway
+  // take their already-existing "no importer" branch.
+  const importStore = useImporter ? new ImportStore(importsFile) : undefined
   new SessionHubRuntime(ctx, registry, modelSync, importStore)
-  void importStore.load().then(() => {
-    console.info(`[dsh-session-hub] imported ${importStore.sessions.size} external sessions`)
-  }).catch((error: unknown) => {
-    console.warn('[dsh-session-hub] importer load failed:', error)
-  })
-  ctx.effect(() => {
-    const timer = setInterval(() => {
-      const auto = importStore.autoSources()
-      if (auto.length === 0) return
-      void importStore.rescan(auto).catch(() => {})
-    }, 60_000)
-    return () => clearInterval(timer)
-  }, 'dsh-session-hub: importer watcher')
+  if (importStore !== undefined) {
+    void importStore.load().then(() => {
+      console.info(`[dsh-session-hub] imported ${importStore.sessions.size} external sessions`)
+    }).catch((error: unknown) => {
+      console.warn('[dsh-session-hub] importer load failed:', error)
+    })
+    ctx.effect(() => {
+      const timer = setInterval(() => {
+        const auto = importStore.autoSources()
+        if (auto.length === 0) return
+        void importStore.rescan(auto).catch(() => {})
+      }, 60_000)
+      return () => clearInterval(timer)
+    }, 'dsh-session-hub: importer watcher')
+  }
 
   // Aggregation gateway: exact-path routes (exact beats the official /api
   // prefix route) re-check the browser-trust fence, then route session
   // methods by ownership — remote sessions to their ServerLink, everything
   // else to the official ApiProxy. This is what makes the unmodified
   // official Web UI open and control remote sessions.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const gateway = new HubGateway(
-    official,
-    registry,
-    resolved.trustedHosts ?? [],
-    importStore,
-    // Read lazily and defensively: promotion is an optional capability, and a
-    // deployment without a session store must still load the rest of the hub.
-    () => {
-      try {
-        const store = (ctx as unknown as { sessions?: unknown }).sessions
-        return typeof (store as { create?: unknown } | undefined)?.create === 'function'
-          ? store as never
-          : undefined
-      } catch {
-        return undefined
-      }
-    },
-  )
+  //
+  // Both halves of the plugin want it, for different reasons: aggregation
+  // needs it to reach remote servers, and the importer needs it to put
+  // imported sessions in the tree. It is skipped only when neither is on,
+  // in which case the plugin registers no /api routes at all.
+  const gateway = (useAggregate || useImporter)
+    ? new HubGateway(
+      official,
+      registry,
+      resolved.trustedHosts ?? [],
+      importStore,
+      // Read lazily and defensively: promotion is an optional capability, and a
+      // deployment without a session store must still load the rest of the hub.
+      () => {
+        try {
+          const store = (ctx as unknown as { sessions?: unknown }).sessions
+          return typeof (store as { create?: unknown } | undefined)?.create === 'function'
+            ? store as never
+            : undefined
+        } catch {
+          return undefined
+        }
+      },
+    )
+    : undefined
 
-  // Virtual-workspace live projection: the official client pulls workspace.list
-  // only once per connection, so remote session drift (added/removed servers,
-  // session create/delete/title) must reach the tree as synthetic host frames
-  // over the same SSE bus the bridge consumes. A 1.5s diff watcher publishes
-  // host/workspace-changed (full view) and host/workspace-removed deltas.
-  ctx.effect(() => {
-    let last = new Map<string, string>()
-    const timer = setInterval(() => {
-      const views = gateway.virtualWorkspaceViews()
-      const current = new Map(views.map(view => [view.workspaceId, `${view.title}\u0001${view.sessionIds.join('\u0001')}`]))
-      for (const view of views) {
-        if (last.get(view.workspaceId) !== current.get(view.workspaceId)) {
-          registry.events.publish(view.workspaceId as never, 'hub:workspace', {
-            type: 'host/workspace-changed',
-            workspace: view,
-          })
-        }
-      }
-      for (const id of last.keys()) {
-        if (!current.has(id)) {
-          registry.events.publish(id as never, 'hub:workspace', { type: 'host/workspace-removed', workspaceId: id })
-        }
-      }
-      last = current
-    }, 1500)
-    return () => clearInterval(timer)
-  }, 'dsh-session-hub: virtual workspace frame watcher')
+  if (gateway !== undefined) {
     ctx.effect(() => {
       const disposers: (() => void)[] = []
       for (const method of GATEWAY_METHODS) {
@@ -163,6 +179,38 @@ export function apply(ctx: Context, config?: Config): void {
       }
       return () => { for (const dispose of disposers) dispose() }
     }, 'dsh-session-hub: /api gateway routes')
+  }
+
+  // Virtual-workspace live projection: the official client pulls workspace.list
+  // only once per connection, so remote session drift (added/removed servers,
+  // session create/delete/title) must reach the tree as synthetic host frames
+  // over the same SSE bus the bridge consumes. A 1.5s diff watcher publishes
+  // host/workspace-changed (full view) and host/workspace-removed deltas.
+  // Only aggregation mints virtual groups, so this watcher follows it.
+  if (useAggregate && gateway !== undefined) {
+    ctx.effect(() => {
+      let last = new Map<string, string>()
+      const timer = setInterval(() => {
+        const views = gateway.virtualWorkspaceViews()
+        const current = new Map(views.map(view => [view.workspaceId, `${view.title}${view.sessionIds.join('')}`]))
+        for (const view of views) {
+          if (last.get(view.workspaceId) !== current.get(view.workspaceId)) {
+            registry.events.publish(view.workspaceId as never, 'hub:workspace', {
+              type: 'host/workspace-changed',
+              workspace: view,
+            })
+          }
+        }
+        for (const id of last.keys()) {
+          if (!current.has(id)) {
+            registry.events.publish(id as never, 'hub:workspace', { type: 'host/workspace-removed', workspaceId: id })
+          }
+        }
+        last = current
+      }, 1500)
+      return () => clearInterval(timer)
+    }, 'dsh-session-hub: virtual workspace frame watcher')
+  }
 
   // Strict endpoint registration: the gateway resolves sessionHub/<method>
   // from this manifest, independent of decorator marker state.
@@ -179,10 +227,12 @@ export function apply(ctx: Context, config?: Config): void {
 
   // Incremental model-config sync: every 3s, sync a server once right after
   // it reaches `connected` (and at most once per minute per server).
-  ctx.effect(() => {
-    const timer = setInterval(() => modelSync.autoTick(), 3000)
-    return () => clearInterval(timer)
-  }, 'dsh-session-hub: model sync watcher')
+  if (modelSync !== undefined) {
+    ctx.effect(() => {
+      const timer = setInterval(() => modelSync.autoTick(), 3000)
+      return () => clearInterval(timer)
+    }, 'dsh-session-hub: model sync watcher')
+  }
 
   // Registry teardown follows the owning fiber.
   ctx.effect(() => () => { registry.dispose() }, 'dsh-session-hub: registry')

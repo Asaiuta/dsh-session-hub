@@ -102,6 +102,13 @@ export interface HubSnapshot {
     readonly hubId: string;
     /** Random SSE credential for `/hub/events` (changes on host restart). */
     readonly eventToken: string;
+    /** Which halves of the plugin this deployment enabled. */
+    readonly features: {
+        readonly aggregate: boolean;
+        readonly tunnel: boolean;
+        readonly modelSync: boolean;
+        readonly importer: boolean;
+    };
     readonly servers: readonly ServerView[];
     readonly sessions: readonly RemoteSessionRow[];
     readonly pending: readonly PendingRow[];

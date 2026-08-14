@@ -196,6 +196,10 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 |---|---|---|---|
 | `dataFile` | `string?` | `$DSH_HOME/plugins/dsh-session-hub.json` | 服务器注册表持久化位置 |
 | `trustedHosts` | `string[]?` | 仅环回 | 网关拦截的 `/api` 再校验白名单（裸 `host[:port]`，格式同 `client-connection.trustedHosts`；SSH 隧道部署无需配置） |
+| `features.aggregate` | `boolean` | `true` | 多服务器聚合：关闭后不注册 `/api` 拦截、不建虚拟分组，服务器卡片从设置里消失 |
+| `features.tunnel` | `boolean` | `true` | SSH 隧道托管：关闭后添加表单只剩直连地址，已保存的 SSH 条目会被跳过并在日志里说明 |
+| `features.modelSync` | `boolean` | `true` | 模型配置同步：关闭后不读本机凭据、不推送远端，同步卡片消失 |
+| `features.importer` | `boolean` | `true` | 外部会话导入：关闭后不读解析缓存、不扫描日志目录，导入卡片消失（缓存文件保留，重新开启即恢复） |
 
 在 profile 的 `cordis.yml` / `cordis.patch.yml` 中配置：
 
@@ -225,6 +229,8 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 - 出站（对每个已配置服务器 `baseUrl`）：HTTP `POST /api/*`（unary RPC）+ WebSocket 升级 `/api/events.mux`、`/api/events.host`；
 - 入站（本机进程内）：`/hub/events` SSE（仅环回 Host + 随机 token + 浏览器 same-origin 三重校验）、Typert `/api/sessionHub/*`（环回）；
 - 入站（浏览器）：被拦截的 `/api/session.*` 与 `/api/respond` 会经网关再校验环回/`trustedHosts`。
+
+> 四个开关默认全开，装完即用。只想要其中一部分时在 `cordis.patch.yml` 里关掉其余的 —— 关闭的功能不构造、不扫描、不注册路由，也不在设置页出现。四个全关时插件等于没装（不拦截任何 `/api`）。
 
 **SSH 密钥**：SSH 隧道条目会按你填写的路径读取私钥（仅用于建立那条隧道），密钥内容不落盘、不外传、不写进插件配置 —— 配置里只存路径。留空则走 ssh agent，插件完全不接触密钥材料。
 

@@ -29,6 +29,22 @@ export interface Config {
      * only (SSH-tunnel deployments need nothing here).
      */
     trustedHosts?: string[];
+    /**
+     * Which halves of the plugin actually run. Everything is on by default —
+     * this exists so a deployment that only wants one of them does not pay for
+     * the rest: a disabled feature is never constructed, never scans, never
+     * registers a route, and never shows up in the settings tab.
+     */
+    features?: {
+        /** Merge remote servers into the official tree (the gateway). */
+        aggregate?: boolean;
+        /** Open and supervise SSH tunnels for server entries. */
+        tunnel?: boolean;
+        /** Push local llm-* settings to connected servers. */
+        modelSync?: boolean;
+        /** Surface Codex / Claude Code / opencode logs as sessions. */
+        importer?: boolean;
+    };
 }
 /**
  * Configuration schema: deployment-varying choices stay tunable from

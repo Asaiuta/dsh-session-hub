@@ -51,7 +51,15 @@ export class ServerRegistry {
   /** Random SSE credential; changes every host restart. */
   readonly eventToken = newEventToken()
 
-  constructor(private readonly dataFile: string) {
+  /** Whether this deployment manages SSH tunnels at all. */
+  private readonly tunnelsEnabled: boolean
+  /** Reported to the browser so the settings tab only offers what runs. */
+  features: { aggregate: boolean; tunnel: boolean; modelSync: boolean; importer: boolean } = {
+    aggregate: true, tunnel: true, modelSync: true, importer: true,
+  }
+
+  constructor(private readonly dataFile: string, options?: { tunnels?: boolean }) {
+    this.tunnelsEnabled = options?.tunnels !== false
     void this.load()
   }
 
@@ -82,6 +90,9 @@ export class ServerRegistry {
    * of; a tunnel that cannot start is a failed add, not a dead entry.
    */
   async addSsh(name: string, target: SshTarget): Promise<ServerView> {
+    if (!this.tunnelsEnabled) {
+      throw new Error('tunnel: SSH tunnels are disabled in this deployment (features.tunnel)')
+    }
     const id = randomUUID() as ServerId
     const tunnel = new SshTunnel(target, () => this.onTunnelChange(id))
     this.tunnels.set(id, tunnel)
@@ -242,6 +253,7 @@ export class ServerRegistry {
     return {
       hubId: this.hubId,
       eventToken: this.eventToken,
+      features: this.features,
       servers,
       sessions,
       pending,
@@ -295,6 +307,10 @@ export class ServerRegistry {
         if (typeof entry.id !== 'string' || typeof entry.name !== 'string') continue
         const id = entry.id as ServerId
 
+        if (entry.ssh !== undefined && !this.tunnelsEnabled) {
+          console.warn(`[dsh-session-hub] skipping "${entry.name}": it needs an SSH tunnel and features.tunnel is off`)
+          continue
+        }
         if (entry.ssh !== undefined) {
           // Tunnelled entry: bring the forward up, then hang a link off
           // whatever port it landed on. A tunnel that fails here keeps

@@ -229,6 +229,9 @@ export function SessionHubSettingsTab(props: {
 
   const servers = snapshot?.servers ?? []
   const sessions = snapshot?.sessions ?? []
+  // A disabled half is absent from the host, so offering its card would be
+  // offering a button that cannot do anything.
+  const features = snapshot?.features ?? { aggregate: true, tunnel: true, modelSync: true, importer: true }
 
   return (
     <div className="dsh-hub-settings">
@@ -241,7 +244,7 @@ export function SessionHubSettingsTab(props: {
         </span>
       </div>
 
-      <div className="dsh-hub-settings-card">
+      {features.modelSync && <div className="dsh-hub-settings-card">
         <div className="dsh-hub-settings-head">
           <span className="dsh-hub-settings-head-title">{t('modelSyncTitle')}</span>
           <button
@@ -256,11 +259,11 @@ export function SessionHubSettingsTab(props: {
         </div>
         <p className="dsh-hub-settings-sub">{t('modelSyncIntro')}</p>
         {syncResult !== null && <p className="dsh-hub-settings-result">{syncResult}</p>}
-      </div>
+      </div>}
 
-      <ImportCard hub={hub} />
+      {features.importer && <ImportCard hub={hub} />}
 
-      <div className="dsh-hub-settings-card">
+      {features.aggregate && <div className="dsh-hub-settings-card">
         <div className="dsh-hub-settings-head">
           <span className="dsh-hub-settings-head-title">{t('servers')}</span>
           <button
@@ -276,6 +279,7 @@ export function SessionHubSettingsTab(props: {
         {adding && (
           <AddServerForm
             hub={hub}
+            allowTunnel={features.tunnel}
             onDone={() => setAdding(false)}
           />
         )}
@@ -304,18 +308,20 @@ export function SessionHubSettingsTab(props: {
             sessionCount={sessions.filter(row => row.serverId === server.id).length}
           />
         ))}
-      </div>
+      </div>}
     </div>
   )
 }
 
 function AddServerForm(props: {
   hub: SessionHubNamespaceFace | undefined
+  /** False when the deployment turned tunnels off; only direct URLs then. */
+  allowTunnel: boolean
   onDone: () => void
 }): JSX.Element {
-  const { hub, onDone } = props
+  const { hub, allowTunnel, onDone } = props
   const [name, setName] = useState('')
-  const [mode, setMode] = useState<'ssh' | 'direct'>('ssh')
+  const [mode, setMode] = useState<'ssh' | 'direct'>(allowTunnel ? 'ssh' : 'direct')
   const [baseUrl, setBaseUrl] = useState('')
   const [sshHost, setSshHost] = useState('')
   const [sshUser, setSshUser] = useState('')
@@ -389,12 +395,14 @@ function AddServerForm(props: {
     <div className="dsh-hub-form">
       <input className="dsh-hub-input" placeholder={t('name')} value={name}
         onChange={e => setName(e.target.value)} />
-      <div className="dsh-hub-modes">
-        <button type="button" className={`dsh-hub-mode${mode === 'ssh' ? ' active' : ''}`}
-          onClick={() => setMode('ssh')}>{t('modeSsh')}</button>
-        <button type="button" className={`dsh-hub-mode${mode === 'direct' ? ' active' : ''}`}
-          onClick={() => setMode('direct')}>{t('modeDirect')}</button>
-      </div>
+      {allowTunnel && (
+        <div className="dsh-hub-modes">
+          <button type="button" className={`dsh-hub-mode${mode === 'ssh' ? ' active' : ''}`}
+            onClick={() => setMode('ssh')}>{t('modeSsh')}</button>
+          <button type="button" className={`dsh-hub-mode${mode === 'direct' ? ' active' : ''}`}
+            onClick={() => setMode('direct')}>{t('modeDirect')}</button>
+        </div>
+      )}
       {mode === 'direct'
         ? <input className="dsh-hub-input" placeholder={t('url')} value={baseUrl}
             onChange={e => setBaseUrl(e.target.value)} />

@@ -17,7 +17,18 @@ export declare class ServerRegistry {
     readonly hubId: `${string}-${string}-${string}-${string}-${string}`;
     /** Random SSE credential; changes every host restart. */
     readonly eventToken: string;
-    constructor(dataFile: string);
+    /** Whether this deployment manages SSH tunnels at all. */
+    private readonly tunnelsEnabled;
+    /** Reported to the browser so the settings tab only offers what runs. */
+    features: {
+        aggregate: boolean;
+        tunnel: boolean;
+        modelSync: boolean;
+        importer: boolean;
+    };
+    constructor(dataFile: string, options?: {
+        tunnels?: boolean;
+    });
     /**
      * Add a server, persist, and start its link. Rejects a self-loop (a baseUrl
      * pointing back at this same hub process — it would forward into itself and
