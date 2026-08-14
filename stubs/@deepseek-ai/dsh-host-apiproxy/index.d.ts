@@ -145,18 +145,15 @@ export type MuxFrame =
   | { type: 'stream/error'; error: RpcError }
 
 export type HostFrame =
-  | { type: 'session-added'; sessionId: string }
-  | { type: 'session-removed'; sessionId: string }
-  | { type: 'session-status'; sessionId: string; running: boolean }
-  | { type: 'agent-error'; sessionId: string; error: RpcError }
-  | { type: 'workspace-changed' }
-  | { type: 'workspace-removed'; workspaceId: string }
-  | { type: 'host/remote-event'; event: string; args: unknown[] }
-  // Virtual-workspace projection (hub-synthesized): servers appear as
-  // workspace groups in the official tree.
+  | { type: 'host/session-added'; sessionId: string }
+  | { type: 'host/session-removed'; sessionId: string }
+  | { type: 'host/session-status'; sessionId: string; running: boolean }
+  | { type: 'host/agent-error'; sessionId: string; error: RpcError }
   | { type: 'host/workspace-changed'; workspace: WorkspaceView }
   | { type: 'host/workspace-removed'; workspaceId: string }
   | { type: 'host/workspace-order-changed'; workspaceIds: string[] }
+  | { type: 'host/archived-sessions-changed'; archivedSessionIds: string[] }
+  | { type: 'host/remote-event'; event: string; args: unknown[] }
 
 /** One workspace row (wire projection; the hub synthesizes views for servers). */
 export interface WorkspaceView {

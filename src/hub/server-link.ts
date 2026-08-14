@@ -45,6 +45,8 @@ export class ServerLink {
   private lastError: string | undefined
   private hostFacts: ServerView['host']
   private summaries: SessionSummary[] = []
+  private archivedIds: string[] = []
+  private archivedLoaded = false
   private readonly pendingMap = new Map<string, PendingRow>()
   private generation = 0
   private listTimer: ReturnType<typeof setTimeout> | undefined
@@ -53,11 +55,17 @@ export class ServerLink {
   constructor(
     readonly id: ServerId,
     readonly baseUrl: string,
-    private readonly name: string,
+    private name: string,
     private readonly notify: LinkListener,
     private readonly onFrame?: FrameListener,
   ) {
     this.api = new RemoteApiClient(baseUrl)
+  }
+
+  /** Update the display name in place (no reconnect). */
+  setName(name: string): void {
+    this.name = name
+    this.notify()
   }
 
   get stateView(): ServerState { return this.state }
@@ -123,7 +131,7 @@ export class ServerLink {
     return this.unary('fork', { sessionId, ...(atSeq === undefined ? {} : { atSeq }) })
   }
 
-  async create(opts: { workspaceId?: string; cwd?: string; agentPreset?: string }): Promise<ActionResult<{ sessionId: string; agentPreset?: string }>> {
+  async create(opts: { workspaceId?: string; cwd?: string; agentPreset?: string; sessionId?: string }): Promise<ActionResult<{ sessionId: string; agentPreset?: string }>> {
     return this.unary('create', opts)
   }
 
@@ -337,16 +345,24 @@ export class ServerLink {
       const frame = envelope.payload
       this.onFrame?.(envelope.rpcId, frame)
       switch (frame.type) {
-        case 'session-added':
-        case 'session-removed':
-        case 'session-status':
-        case 'workspace-changed':
-        case 'workspace-removed':
-        case 'agent-error':
+        case 'host/session-added':
+        case 'host/session-removed':
+        case 'host/session-status':
+        case 'host/workspace-changed':
+        case 'host/workspace-removed':
+        case 'host/agent-error':
+        case 'host/archived-sessions-changed':
           this.scheduleListRefresh(generation)
           break
         default:
           break
+      }
+      if (frame.type === 'host/archived-sessions-changed') {
+        const ids = frame.archivedSessionIds
+        if (Array.isArray(ids)) {
+          this.archivedIds = ids.filter((id): id is string => typeof id === 'string')
+          this.archivedLoaded = true
+        }
       }
     }
   }
@@ -364,6 +380,33 @@ export class ServerLink {
     const response = await this.api.sessions.list({}, signal)
     if (!response.result.ok || generation !== this.generation) return
     this.summaries = response.result.value.items
+    if (!this.archivedLoaded) void this.refreshArchived(signal)
+  }
+
+  /**
+   * Pull the remote archive set (workspace.list) into the cached projection
+   * so the merged workspace.list can expose remote archived sessions in the
+   * official tree's archive section. Cached for the link's lifetime and kept
+   * live via host/archived-sessions-changed frames.
+   */
+  async refreshArchived(signal: AbortSignal = this.abort.signal): Promise<void> {
+    try {
+      const response = await this.wireCall('workspace.list', {})
+      if (!response.ok) return
+      const ids = (response.value as { archivedSessionIds?: unknown } | undefined)?.archivedSessionIds
+      if (Array.isArray(ids)) {
+        this.archivedIds = ids.filter((id): id is string => typeof id === 'string')
+        this.archivedLoaded = true
+        this.notify()
+      }
+    } catch {
+      // Stale link: keep the previous archive set.
+    }
+  }
+
+  /** The remote's archived session ids (mirrors workspace.list). */
+  archivedSessionIds(): string[] {
+    return this.archivedIds
   }
 }
 

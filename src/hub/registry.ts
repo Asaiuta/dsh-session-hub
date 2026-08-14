@@ -89,6 +89,19 @@ export class ServerRegistry {
     this.emitChange()
   }
 
+  /**
+   * Rename a server's display name in place — no link rebuild, no
+   * reconnect. Used by the official tree's workspace rename on virtual
+   * server groups.
+   */
+  renameDisplay(id: ServerId, title: string): ServerView {
+    const link = this.require(id)
+    link.setName(title)
+    this.schedulePersist()
+    this.emitChange()
+    return link.toView()
+  }
+
   dispose(): void {
     for (const link of this.links.values()) link.stop()
     this.links.clear()

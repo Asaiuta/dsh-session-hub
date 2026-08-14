@@ -36,7 +36,11 @@ export const GATEWAY_METHODS = [
   'session.list',
   ...ROUTED_SESSION_METHODS,
   'session.search',
+  'session.create',
   'workspace.list',
+  'workspace.archiveSession',
+  'workspace.rename',
+  'workspace.delete',
   'respond',
 ]
 
@@ -127,9 +131,13 @@ export class HubGateway {
     const { rpcId, payload } = envelope
     try {
       if (method === 'session.list') return this.list(rpcId, payload)
+      if (method === 'session.create') return this.createSession(rpcId, payload)
       if (ROUTED_SESSION_METHODS.has(method)) return this.bySession(method, rpcId, payload)
       if (method === 'session.search') return this.search(rpcId, payload)
       if (method === 'workspace.list') return this.workspaceList(rpcId, payload)
+      if (method === 'workspace.archiveSession') return this.bySession(method, rpcId, payload)
+      if (method === 'workspace.rename') return this.renameWorkspace(rpcId, payload)
+      if (method === 'workspace.delete') return this.deleteWorkspace(rpcId, payload)
       if (method === 'respond') return this.respond(rpcId, payload)
       return this.callOfficial(method, rpcId, payload)
     } catch (error) {
@@ -185,7 +193,12 @@ export class HubGateway {
     if (!local.result.ok || !Array.isArray((local.result.value as { items?: unknown }).items)) {
       return local
     }
-    const value = local.result.value as { items: unknown[]; archivedSessionIds: unknown }
+    const value = local.result.value as { items: unknown[]; archivedSessionIds?: unknown }
+    const localArchived = Array.isArray(value.archivedSessionIds)
+      ? value.archivedSessionIds.filter((id): id is string => typeof id === 'string')
+      : []
+    const remoteArchived = this.registry.linkList().flatMap(link => link.archivedSessionIds())
+    const archivedSessionIds = [...new Set([...localArchived, ...remoteArchived])]
     return {
       type: 'server-response',
       rpcId,
@@ -194,6 +207,7 @@ export class HubGateway {
         value: {
           ...value,
           items: [...value.items, ...this.virtualWorkspaceViews()],
+          archivedSessionIds,
         },
       },
     }
@@ -242,8 +256,64 @@ export class HubGateway {
     if (typeof sessionId !== 'string') return this.callOfficial(method, rpcId, payload)
     const link = this.registry.findLinkBySession(sessionId)
     if (link === undefined) return this.callOfficial(method, rpcId, payload)
-    const result = await link.invoke(method, payload as Record<string, unknown>)
+    const result = method === 'workspace.archiveSession'
+      ? await link.wireCall(method, payload)
+      : await link.invoke(method, payload as Record<string, unknown>)
+    if (method === 'workspace.archiveSession' && result.ok) {
+      // The archived id is now in the remote archive set; refresh our cached
+      // projection so the merged workspace.list keeps the tree honest.
+      void link.refreshArchived()
+    }
     return { type: 'server-response', rpcId, result }
+  }
+
+  /**
+   * session.create: a virtual workspace id (a hub server) routes the create
+   * to that server — the remote has no such workspace, so the id is dropped
+   * and the session lands in the remote's default group. No workspace id
+   * (sidebar global New Session) stays on the official path.
+   */
+  private async createSession(rpcId: RpcId, payload: { workspaceId?: unknown; cwd?: unknown; agentPreset?: unknown; sessionId?: unknown }): Promise<RpcResponse<unknown>> {
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : undefined
+    const link = workspaceId === undefined ? undefined : this.registry.link(workspaceId as never)
+    if (link === undefined) return this.callOfficial('session.create', rpcId, payload)
+    const opts: { cwd?: string; agentPreset?: string; sessionId?: string } = {}
+    if (typeof payload.cwd === 'string') opts.cwd = payload.cwd
+    if (typeof payload.agentPreset === 'string') opts.agentPreset = payload.agentPreset
+    if (typeof payload.sessionId === 'string') opts.sessionId = payload.sessionId
+    const result = await link.create(opts)
+    return { type: 'server-response', rpcId, result }
+  }
+
+  /**
+   * workspace.rename on a virtual server group renames the server (display
+   * name, persisted, no reconnect); everything else stays official.
+   */
+  private async renameWorkspace(rpcId: RpcId, payload: { workspaceId?: unknown; title?: unknown }): Promise<RpcResponse<unknown>> {
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : undefined
+    const title = typeof payload.title === 'string' ? payload.title : undefined
+    const link = workspaceId === undefined ? undefined : this.registry.link(workspaceId as never)
+    if (link === undefined || title === undefined || title.trim() === '') {
+      return this.callOfficial('workspace.rename', rpcId, payload)
+    }
+    this.registry.renameDisplay(workspaceId as never, title.trim())
+    const workspace = this.virtualWorkspaceViews().find(view => view.workspaceId === workspaceId)
+    if (workspace === undefined) {
+      return this.callOfficial('workspace.rename', rpcId, payload)
+    }
+    return { type: 'server-response', rpcId, result: { ok: true, value: { workspace } } }
+  }
+
+  /**
+   * workspace.delete on a virtual server group removes the server connection
+   * (config entry included); everything else stays official.
+   */
+  private async deleteWorkspace(rpcId: RpcId, payload: { workspaceId?: unknown }): Promise<RpcResponse<unknown>> {
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : undefined
+    const link = workspaceId === undefined ? undefined : this.registry.link(workspaceId as never)
+    if (link === undefined) return this.callOfficial('workspace.delete', rpcId, payload)
+    this.registry.remove(workspaceId as never)
+    return { type: 'server-response', rpcId, result: { ok: true, value: { deleted: true } } }
   }
 
   /** Route a client response to the remote server holding the pending rpcId. */

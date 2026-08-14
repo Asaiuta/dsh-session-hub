@@ -96,7 +96,7 @@ export function apply(ctx: Context, config?: Config): void {
     let last = new Map<string, string>()
     const timer = setInterval(() => {
       const views = gateway.virtualWorkspaceViews()
-      const current = new Map(views.map(view => [view.workspaceId, view.sessionIds.join('\u0001')]))
+      const current = new Map(views.map(view => [view.workspaceId, `${view.title}\u0001${view.sessionIds.join('\u0001')}`]))
       for (const view of views) {
         if (last.get(view.workspaceId) !== current.get(view.workspaceId)) {
           registry.events.publish(view.workspaceId as never, 'hub:workspace', {
