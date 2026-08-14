@@ -11,6 +11,7 @@
  * Sessions are additive and never written back into any tool's logs.
  */
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy'
@@ -225,6 +226,8 @@ export class ImportStore {
   private readonly cache: CacheFile
   private readonly cachePath: string
   private scanning = false
+  /** Memoized project-directory existence, keyed by normalized path. */
+  private readonly dirCache = new Map<string, boolean>()
 
   constructor(dataFile: string) {
     this.cachePath = dataFile
@@ -257,6 +260,9 @@ export class ImportStore {
     if (this.scanning) return
     this.scanning = true
     try {
+      // A rescan is also the point where a deleted or restored project
+      // directory should be reflected in the tree.
+      this.dirCache.clear()
       await this.runScan(enabled)
     } finally {
       this.scanning = false
@@ -331,9 +337,43 @@ export class ImportStore {
     return this.sessions.get(sessionId)
   }
 
-  /** Imported sessions visible to the official UI, newest first. */
+  /**
+   * Imported sessions visible to the official UI, newest first.
+   *
+   * Sessions whose project directory no longer exists are omitted: the work
+   * they describe is gone, the directory cannot be adopted as a workspace,
+   * and surfacing them only leaves dead groups in the tree.
+   */
   visible(): ImportedSession[] {
-    return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+    return [...this.sessions.values()]
+      .filter(s => this.projectExists(s.cwd))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /**
+   * Whether a session's project directory still exists, memoized per path.
+   *
+   * `visible()` runs on every session.list and workspace.list, so the check
+   * is cached: hundreds of sessions collapse to a few dozen distinct paths,
+   * and the cache is cleared on each rescan so a restored directory comes
+   * back without a restart.
+   *
+   * @param cwd - the session's recorded working directory.
+   * @returns true when the directory is still present.
+   */
+  private projectExists(cwd: string): boolean {
+    const key = normalizePath(cwd)
+    if (key === '') return false
+    const cached = this.dirCache.get(key)
+    if (cached !== undefined) return cached
+    let exists = false
+    try {
+      exists = statSync(cwd).isDirectory()
+    } catch {
+      exists = false
+    }
+    this.dirCache.set(key, exists)
+    return exists
   }
 
   /** Hub session rows for the merged session.list. */
@@ -389,10 +429,15 @@ export class ImportStore {
     return { byWorkspace, orphansByCwd }
   }
 
-  /** Generated HistoryEntries (read-only view). */
+  /**
+   * Generated HistoryEntries (read-only view).
+   *
+   * Mirrors `visible()`: a session hidden because its project directory is
+   * gone must not stay openable through a stale id either.
+   */
   history(sessionId: string): HistoryEvent[] | undefined {
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return undefined
+    if (session === undefined || !this.projectExists(session.cwd)) return undefined
     return buildHistory(session)
   }
 }
