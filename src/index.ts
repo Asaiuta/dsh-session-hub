@@ -88,7 +88,9 @@ export function apply(ctx: Context, config?: Config): void {
   const importsFile = join(dshHome, 'plugins', 'dsh-session-hub-imports.json')
   const importStore = new ImportStore(importsFile)
   const configuredImporters = resolved.importers ?? []
-  const enabledImporters = (configuredImporters.length > 0 ? configuredImporters : ['codex', 'claude', 'opencode']) as ImportSource[]
+  const enabledImporters = (configuredImporters.length > 0
+    ? configuredImporters
+    : ['codex', 'claude', 'opencode']) as ImportSource[]
   void importStore.load(enabledImporters).then(() => {
     console.info(`[dsh-session-hub] imported ${importStore.sessions.size} external sessions`)
   }).catch((error: unknown) => {

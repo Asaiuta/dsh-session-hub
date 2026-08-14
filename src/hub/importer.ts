@@ -52,16 +52,36 @@ async function walkFiles(root: string, suffix: string): Promise<string[]> {
   return out
 }
 
-/** Turn a parsed session into a hub session row. */
+/**
+ * Turn a parsed session into a hub session row.
+ *
+ * The row must match the official SessionSummary wire shape exactly: the
+ * client seeds every row's projection baseline with
+ * `store.apply(key, value, block.asOfSeq)`, so a projections block without a
+ * numeric `asOfSeq` poisons the per-session projection store (seq comparisons
+ * against `undefined` are always false) and the whole session list stops
+ * settling — the sidebar then renders workspace groups with no session rows.
+ */
 function toSummary(s: ImportedSession): SessionSummary {
+  // Never emit a non-numeric updatedAt: the official summary requires it, and
+  // a parser regression must not be able to break the whole session list.
+  const updatedAt = Number.isFinite(s.updatedAt) ? s.updatedAt : 0
   return {
     sessionId: s.sessionId,
-    title: undefined,
-    blank: false,
+    updatedAt,
     running: false,
+    blank: false,
     cwd: s.cwd,
-    updatedAt: s.updatedAt,
-    projections: { values: { title: s.title } },
+    agentPreset: 'standard',
+    projections: {
+      // Imported logs carry no live watermark: -1 is the documented
+      // empty-log convention, so any real frame supersedes these values.
+      asOfSeq: -1,
+      values: {
+        title: s.title,
+        sessionListMetadata: { blank: false, lastPromptAt: updatedAt },
+      },
+    },
   } as SessionSummary
 }
 
@@ -158,7 +178,9 @@ async function scanJsonl(
     if (index >= 0) cache.sessions[index] = parsed
     else cache.sessions.push(parsed)
   }
-  console.info(`[dsh-session-hub] import scan ${root} → ${files.length} files, ${parsedCount} parsed`)
+  if (parsedCount > 0) {
+    console.info(`[dsh-session-hub] import scan ${root} → ${files.length} files, ${parsedCount} parsed`)
+  }
 }
 
 /** mtime-indexed, persisted, incremental external-session store. */
@@ -166,6 +188,7 @@ export class ImportStore {
   readonly sessions = new Map<string, ImportedSession>()
   private readonly cache: CacheFile
   private readonly cachePath: string
+  private scanning = false
 
   constructor(dataFile: string) {
     this.cachePath = dataFile
@@ -192,11 +215,23 @@ export class ImportStore {
 
   /** Re-scan changed/new files (cheap when nothing changed). */
   async rescan(enabled: ImportSource[]): Promise<void> {
+    // Scans walk hundreds of JSONL files: overlapping runs would duplicate
+    // that work (and the watcher fires while a slow first scan is still in
+    // flight), so a scan in progress simply absorbs the request.
+    if (this.scanning) return
+    this.scanning = true
+    try {
+      await this.runScan(enabled)
+    } finally {
+      this.scanning = false
+    }
+  }
+
+  private async runScan(enabled: ImportSource[]): Promise<void> {
     const home = homedir()
     const codexRoot = join(home, '.codex', 'sessions')
     const claudeRoot = join(home, '.claude', 'projects')
     const opencodeDb = join(home, '.local', 'share', 'opencode', 'opencode.db')
-    console.info(`[dsh-session-hub] import rescan home=${home} codex=${codexRoot} claude=${claudeRoot} opencode=${opencodeDb}`)
     const jsonlRoots = new Set<string>()
     if (enabled.includes('codex')) {
       for (const file of await walkFiles(codexRoot, '.jsonl')) jsonlRoots.add(file)
@@ -260,17 +295,20 @@ export class ImportStore {
     return this.sessions.get(sessionId)
   }
 
+  /** Imported sessions visible to the official UI, newest first. */
+  visible(): ImportedSession[] {
+    return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
   /** Hub session rows for the merged session.list. */
   rows(): SessionSummary[] {
-    return [...this.sessions.values()]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(toSummary)
+    return this.visible().map(toSummary)
   }
 
   /** Imported session ids whose cwd matches the given workspace path. */
   idsForWorkspace(workspacePath: string): string[] {
     const norm = normalizePath(workspacePath)
-    return [...this.sessions.values()]
+    return this.visible()
       .filter(s => normalizePath(s.cwd) === norm)
       .map(s => s.sessionId)
   }

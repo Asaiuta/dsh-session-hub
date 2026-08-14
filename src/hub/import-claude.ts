@@ -59,7 +59,15 @@ export async function parseClaudeProject(file: string): Promise<ImportedSession 
     }
     if (row.type !== 'user' && row.type !== 'assistant') continue
     if (row.uuid === undefined) continue
-    const time = Date.parse(row.timestamp ?? '') || typeof row.ts === 'number' ? (row.ts as number) : Date.now()
+    // Precedence matters: the ISO `timestamp` is the primary source and the
+    // numeric `ts` only a fallback. Mixing `||` with `?:` here previously
+    // resolved to `row.ts` (absent on Claude rows) and produced NaN/undefined
+    // timestamps, which stripped `updatedAt` from the emitted summary and
+    // broke the official session list.
+    const parsed = Date.parse(row.timestamp ?? '')
+    const time = Number.isFinite(parsed)
+      ? parsed
+      : typeof row.ts === 'number' ? row.ts : Date.now()
     if (row.type === 'user') {
       const msg = row.message as { content?: string } | undefined
       if (row.isMeta) continue

@@ -51,10 +51,19 @@ export function capText(text: string): string {
   return text.length > MAX_TURN_CHARS ? `${text.slice(0, MAX_TURN_CHARS)}\n…(truncated)` : text
 }
 
-/** Best-effort title from the first meaningful user line. */
+/**
+ * Best-effort title from the first meaningful user line.
+ *
+ * Claude Code records slash commands as XML-ish envelopes
+ * (`<command-name>/model</command-name>`); those tags are transport noise,
+ * not a title, so they are unwrapped to their inner text first.
+ */
 export function deriveTitle(cwd: string, firstUserText: string): string {
-  const line = firstUserText.split('\n').map(l => l.trim()).find(l => l.length > 0)
-  const cleaned = (line ?? '').replace(/^[#>*\-\s]+/, '').slice(0, 80)
+  const unwrapped = firstUserText
+    .replace(/<command-name>([^<]*)<\/command-name>/g, '$1')
+    .replace(/<[^>]{1,40}>/g, ' ')
+  const line = unwrapped.split('\n').map(l => l.trim()).find(l => l.length > 0)
+  const cleaned = (line ?? '').replace(/^[#>*\-\s]+/, '').trim().slice(0, 80)
   if (cleaned.length >= 3) return cleaned
   const parts = cwd.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] ?? cwd
