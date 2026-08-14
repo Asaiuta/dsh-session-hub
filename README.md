@@ -9,6 +9,7 @@
 
 <a href="https://www.npmjs.com/package/dsh-session-hub"><img alt="npm" src="https://img.shields.io/npm/v/dsh-session-hub/alpha?style=flat-square&color=4b6fff"></a>
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+<a href="CHANGELOG.md"><img alt="changelog" src="https://img.shields.io/badge/changelog-alpha.2-8957e5?style=flat-square"></a>
 <img alt="alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
 <img alt="node" src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-3c873a?style=flat-square">
 <img alt="DSH" src="https://img.shields.io/badge/DSH-0.1.0--rc.6-4b6fff?style=flat-square">
@@ -16,7 +17,7 @@
 </div>
 
 > [!WARNING]
-> **Alpha（`0.1.0-alpha.1`）**：核心链路已实机验证（网关路由 / 官方 UI 桥接 / 实时帧注入 / 审批应答 / 跨机对话），
+> **Alpha（`0.1.0-alpha.2`）**（[本版改动](CHANGELOG.md)）：核心链路已实机验证（网关路由 / 官方 UI 桥接 / 实时帧注入 / 审批应答 / 跨机对话），
 > 但仅在单一环境（Windows 本机 + 腾讯云 Linux，SSH 隧道）验证过，配置格式与安全边界仍可能变化。
 
 ## 这是什么
@@ -90,7 +91,7 @@ dsh plugin --profile web add dsh-session-hub@alpha
 <summary><b>不走 npm：直接装 GitHub tarball</b></summary>
 
 ```bash
-dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.2.tar.gz
 ```
 
 仓库已提交构建产物，tarball 安装同样无需本地构建。
@@ -164,7 +165,7 @@ dsh web --port 3080          # 只监听环回，这也是当前唯一允许的�
 **② 本机** —— 只装插件：
 
 ```bash
-dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.2.tar.gz
 # 重启 dsh web
 ```
 
@@ -354,6 +355,7 @@ Set features.aggregate and features.importer to false to silence this, or remove
 **日志位置**：`dsh web` 进程 stdout/stderr——systemd 部署 `journalctl -u dsh-web`，nohup 部署看输出文件；本地终端部署看控制台。
 
 **回滚**：`dsh plugin --profile web add dsh-session-hub@<上一版本>` 并重启即可。注册表文件向后兼容（未知字段忽略），降级不会丢配置。
+各版本的破坏性变更与降级注意事项见 **[CHANGELOG](CHANGELOG.md)**。
 
 ## 开发
 
