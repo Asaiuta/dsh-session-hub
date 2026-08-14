@@ -7,6 +7,7 @@
 多台服务器的会话汇进本机官方 Web UI —— 侧边栏零改动、对话区零替换。
 顺手把 Codex CLI / Claude Code / opencode 的历史对话也接进来。
 
+<a href="https://www.npmjs.com/package/dsh-session-hub"><img alt="npm" src="https://img.shields.io/npm/v/dsh-session-hub/alpha?style=flat-square&color=4b6fff"></a>
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
 <img alt="alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
 <img alt="node" src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-3c873a?style=flat-square">
@@ -63,13 +64,24 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+dsh plugin --profile web add dsh-session-hub@alpha
 ```
 
 装完**重启 `dsh web`**（`kill -TERM <pid>` 并等待退出，别用 `kill -9` —— 会在写入中途撕裂会话 zstd 日志），刷新页面。
 **设置 → 插件** 里出现 **会话枢纽** 标签页即成功。
 
-`dsh plugin` 把参数原样转发给 profile 目录里的 pnpm（本机需要 pnpm）。仓库已提交构建产物，tarball 安装无需本地构建。
+`dsh plugin` 把参数原样转发给 profile 目录里的 pnpm（本机需要 pnpm）。当前只有 alpha 版，`@alpha` 与不带标签装到的是同一个版本。
+
+<details>
+<summary><b>不走 npm：直接装 GitHub tarball</b></summary>
+
+```bash
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+```
+
+仓库已提交构建产物，tarball 安装同样无需本地构建。
+
+</details>
 
 <details>
 <summary><b>从源码安装（改代码调试）</b></summary>
@@ -87,10 +99,10 @@ dsh plugin --profile web add file:$(pwd)
 <details>
 <summary><b>升级 / 禁用 / 彻底移除</b></summary>
 
-**升级** —— 换成新版本的 tarball URL 重跑 add，重启 `dsh web`：
+**升级** —— 重跑 add 并重启 `dsh web`：
 
 ```bash
-dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v<新版本>.tar.gz
+dsh plugin --profile web add dsh-session-hub@alpha
 ```
 
 **临时禁用**：从 profile 的 bundle 列表 / `cordis.patch.yml` 移除 `dsh-session-hub` 条目后重启。
@@ -215,7 +227,7 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 
 **日志位置**：`dsh web` 进程 stdout/stderr——systemd 部署 `journalctl -u dsh-web`，nohup 部署看输出文件；本地终端部署看控制台。
 
-**回滚**：重跑 `dsh plugin --profile web add <上一个 tag 的 tarball URL>` 并重启即可。注册表文件向后兼容（未知字段忽略），降级不会丢配置。
+**回滚**：`dsh plugin --profile web add dsh-session-hub@<上一版本>` 并重启即可。注册表文件向后兼容（未知字段忽略），降级不会丢配置。
 
 ## 开发
 
