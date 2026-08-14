@@ -156,6 +156,20 @@ const CSS = `
 .dsh-hub-form-actions { display: flex; gap: 6px; }
 .dsh-hub-error { color: var(--dsw-status-danger-fg, #e5534b); font-size: 11px; }
 .dsh-hub-live-off { color: var(--dsw-status-danger-fg, #e5534b); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+
+/* Settings tab: model-sync card subtext and result line. */
+.dsh-hub-settings-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary, #8b909c);
+}
+.dsh-hub-settings-result {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary, #e8e9ed);
+}
 `
 
 let injected = false
@@ -166,6 +180,7 @@ export function adoptStyles(): void {
   injected = true
   const style = document.createElement('style')
   style.id = 'dsh-session-hub-styles'
-  style.textContent = CSS
+  const text = document.createTextNode(CSS)
+  style.appendChild(text)
   document.head.appendChild(style)
 }

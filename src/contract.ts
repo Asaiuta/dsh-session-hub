@@ -212,6 +212,21 @@ const sessionCreatePayloadSchema = z.object({
   agentPreset: z.string().optional(),
 }).passthrough()
 
+const modelSyncPayloadSchema = z.object({
+  serverId: serverIdSchema.optional(),
+}).passthrough()
+
+const modelSyncEntrySchema = z.object({
+  serverId: serverIdSchema,
+  updated: z.array(z.string()),
+  credentials: z.array(z.string()),
+  skipped: z.array(z.string()),
+}).passthrough()
+
+const modelSyncResultSchema = z.object({
+  synced: z.array(modelSyncEntrySchema),
+}).passthrough()
+
 const sessionSelectModelPayloadSchema = z.object({
   serverId: serverIdSchema,
   sessionId: z.string().min(1),
@@ -306,6 +321,7 @@ export const SESSION_HUB_INVOCATIONS: readonly InvocationDescriptor[] = [
   descriptor('sessionModels', sessionTargetPayloadSchema, 'dsh-session-hub#SessionTargetPayload', modelsResultSchema, 'dsh-session-hub#SessionModels'),
   descriptor('sessionSelectModel', sessionSelectModelPayloadSchema, 'dsh-session-hub#SessionSelectModelPayload', selectModelResultSchema, 'dsh-session-hub#SelectModelResult'),
   descriptor('respond', respondPayloadSchema, 'dsh-session-hub#RespondPayload', acceptedResultSchema, 'dsh-session-hub#AcceptedResult'),
+  descriptor('modelSync', modelSyncPayloadSchema, 'dsh-session-hub#ModelSyncPayload', modelSyncResultSchema, 'dsh-session-hub#ModelSyncResult'),
   descriptor('serversProbe', probePayloadSchema, 'dsh-session-hub#ProbePayload', probeResultSchema, 'dsh-session-hub#ProbeResult'),
 ]
 

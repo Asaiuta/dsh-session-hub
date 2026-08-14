@@ -56,6 +56,31 @@ export class RemoteApiClient extends AbstractApiClient {
     })
   }
 
+  /**
+   * Unary RPC to any wire domain (settings/credentials/llm/…), envelope in
+   * the standard client-request shape. Privileged methods pass the remote
+   * fence when the Host is loopback (SSH tunnel) or a declared trusted
+   * authority — the same Node non-browser path the fence documents.
+   * @returns the parsed ServerResponse document.
+   */
+  async call(method: string, payload: unknown, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-host-apiproxy').RpcResponse<unknown>> {
+    const target = new URL(this.resolveBase())
+    target.pathname = `/api/${method}`
+    const response = await this.doFetch(target, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        method,
+        rpcId: `hub-${crypto.randomUUID()}`,
+        payload,
+      } as import('@deepseek-ai/dsh-host-apiproxy').ClientRequest),
+      signal,
+    })
+    if (!response.ok) throw new Error(`remote ${method} HTTP ${response.status}`)
+    return (await response.json()) as import('@deepseek-ai/dsh-host-apiproxy').RpcResponse<unknown>
+  }
+
   protected override openMux(
     _payload: Parameters<ApiProxy['events']['mux']>[0]['payload'],
     signal: AbortSignal,

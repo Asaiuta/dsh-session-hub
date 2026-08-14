@@ -20,6 +20,7 @@ import type {} from '@deepseek-ai/dsh-typert-registry'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { createHubEventsRoute } from './hub/events.ts'
 import { GATEWAY_METHODS, HubGateway } from './hub/gateway.ts'
+import { ModelSyncService } from './hub/model-sync.ts'
 import { ServerRegistry } from './hub/registry.ts'
 import { SessionHubRuntime } from './runtime.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
@@ -70,7 +71,9 @@ export function apply(ctx: Context, config?: Config): void {
   const dataFile = resolved.dataFile ?? join(dshHome, 'plugins', 'dsh-session-hub.json')
 
   const registry = new ServerRegistry(dataFile)
-  new SessionHubRuntime(ctx, registry)
+  const official = () => ctx.get('apiProxy') as import('@deepseek-ai/dsh-host-apiproxy').ApiProxy
+  const modelSync = new ModelSyncService(official, registry, dshHome)
+  new SessionHubRuntime(ctx, registry, modelSync)
 
   // Aggregation gateway: exact-path routes (exact beats the official /api
   // prefix route) re-check the browser-trust fence, then route session
@@ -79,7 +82,7 @@ export function apply(ctx: Context, config?: Config): void {
   // official Web UI open and control remote sessions.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gateway = new HubGateway(
-    () => ctx.get('apiProxy') as import('@deepseek-ai/dsh-host-apiproxy').ApiProxy,
+    official,
     registry,
     resolved.trustedHosts ?? [],
   )
@@ -138,6 +141,13 @@ export function apply(ctx: Context, config?: Config): void {
     const route = createHubEventsRoute(registry.events, registry.eventToken)
     return ctx.webServer.register(route)
   }, 'dsh-session-hub: /hub/events route')
+
+  // Incremental model-config sync: every 3s, sync a server once right after
+  // it reaches `connected` (and at most once per minute per server).
+  ctx.effect(() => {
+    const timer = setInterval(() => modelSync.autoTick(), 3000)
+    return () => clearInterval(timer)
+  }, 'dsh-session-hub: model sync watcher')
 
   // Registry teardown follows the owning fiber.
   ctx.effect(() => () => { registry.dispose() }, 'dsh-session-hub: registry')

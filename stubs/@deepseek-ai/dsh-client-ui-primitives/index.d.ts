@@ -9,4 +9,5 @@ export interface DshIconProps extends SVGProps<SVGSVGElement> {
 
 export function IconGlobeOutline14(props: DshIconProps): JSX.Element
 export function IconPlusOutline16(props: DshIconProps): JSX.Element
+export function IconRefreshOutline16(props: DshIconProps): JSX.Element
 export function IconTrashOutline16(props: DshIconProps): JSX.Element

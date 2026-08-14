@@ -37,6 +37,7 @@ export const TYPERT_MANIFEST: TypertContribution = {
           { kind: 'method', name: 'sessionModels', signature: 'sessionModels(payload: { serverId: ServerId; sessionId: string }): SessionModels' },
           { kind: 'method', name: 'sessionSelectModel', signature: 'sessionSelectModel(payload: { serverId: ServerId; sessionId: string; provider: string; model: string; reasoningEffort?: string }): { selected: ModelSelection }' },
           { kind: 'method', name: 'respond', signature: 'respond(payload: { serverId: ServerId; rpcId: string; value: unknown }): { accepted: true }' },
+          { kind: 'method', name: 'modelSync', signature: 'modelSync(payload: { serverId?: ServerId }): { synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }> }' },
         ],
         types: [],
       },

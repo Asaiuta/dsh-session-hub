@@ -33,6 +33,9 @@ export interface SessionHubNamespaceFace {
     reasoningEffort?: string
   }): Promise<RemoteResult<{ selected: { provider: string; model: string; reasoningEffort?: string } }>>
   respond(payload: { serverId: ServerId; rpcId: string; value: unknown }): Promise<RemoteResult<{ accepted: true }>>
+  modelSync(payload: { serverId?: ServerId }): Promise<RemoteResult<{
+    synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }>
+  }>>
 }
 
 export type { RemoteResult, HistoryEntry }

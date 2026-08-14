@@ -7,7 +7,7 @@
  * /api/session.list and the frame bridge.
  */
 import { useEffect, useState } from 'react'
-import { IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HubSnapshot, ServerId } from '../contract.ts'
 import type { SessionHubNamespaceFace } from './face.ts'
 import { getLiveStatus, subscribeLiveChanges, subscribeLiveStatus } from './live.ts'
@@ -105,8 +105,31 @@ export function SessionHubSettingsTab(props: {
   const { snapshot, error } = useSnapshot(hub)
   const [live, setLive] = useState(getLiveStatus())
   const [adding, setAdding] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
 
   useEffect(() => subscribeLiveStatus(setLive), [])
+
+  const runModelSync = async (): Promise<void> => {
+    const h = hub
+    if (h === undefined || syncing) return
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const result = await h.modelSync({})
+      if (result.ok) {
+        const entries = result.value.synced
+        const updated = entries.reduce((n, e) => n + e.updated.length, 0)
+        const credentials = entries.reduce((n, e) => n + e.credentials.length, 0)
+        const skipped = entries.reduce((n, e) => n + e.skipped.length, 0)
+        setSyncResult(tf('modelSyncDone')(String(entries.length), String(updated), String(credentials), String(skipped)))
+      } else {
+        setSyncResult(tf('actionError')(result.error.message))
+      }
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const servers = snapshot?.servers ?? []
   const sessions = snapshot?.sessions ?? []
@@ -120,6 +143,23 @@ export function SessionHubSettingsTab(props: {
           title={tf('liveOffHint')()}>
           {live === 'live' ? `● ${t('stateConnected')}` : t('liveOff')}
         </span>
+      </div>
+
+      <div className="dsh-hub-settings-card">
+        <div className="dsh-hub-settings-head">
+          <span className="dsh-hub-settings-head-title">{t('modelSyncTitle')}</span>
+          <button
+            type="button"
+            className="dsh-hub-btn"
+            onClick={() => void runModelSync()}
+            disabled={syncing}
+          >
+            <IconRefreshOutline16 size={14} />
+            {syncing ? t('modelSyncRunning') : t('modelSyncRun')}
+          </button>
+        </div>
+        <p className="dsh-hub-settings-sub">{t('modelSyncIntro')}</p>
+        {syncResult !== null && <p className="dsh-hub-settings-result">{syncResult}</p>}
       </div>
 
       <div className="dsh-hub-settings-card">

@@ -11,6 +11,7 @@ import type { HistoryEntry, SessionModels, SessionSummary } from '@deepseek-ai/d
 import type { HubSnapshot, PendingRow, ServerId, ServerView } from './contract.ts'
 import { ServerRegistry } from './hub/registry.ts'
 import type { ActionResult } from './hub/server-link.ts'
+import type { ModelSyncService } from './hub/model-sync.ts'
 
 /** Throw an RPC-style error the Typert layer maps into the error result slot. */
 function fail(code: string, message: string): never {
@@ -60,8 +61,23 @@ export class SessionHubRuntime extends TypertRemoteService {
   constructor(
     ctx: Context,
     private readonly registry: ServerRegistry,
+    private readonly syncService?: ModelSyncService,
   ) {
     super(ctx, 'sessionHub')
+  }
+
+  // ---- Model-config sync ----
+
+  /**
+   * Incrementally sync the local model configuration (llm-* namespaces +
+   * agent-default-model + credential references) to one server, or to every
+   * connected server. Additive only: missing pieces are filled, existing
+   * remote state is never overwritten.
+   */
+  @Remote
+  async modelSync(payload: { serverId?: ServerId }): Promise<{ synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }> }> {
+    if (this.syncService === undefined) fail('not-configured', 'model sync service unavailable')
+    return out(await this.syncService.sync(payload.serverId))
   }
 
   // ---- Server registry ----

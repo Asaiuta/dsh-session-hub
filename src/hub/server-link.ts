@@ -181,6 +181,20 @@ export class ServerLink {
     }
   }
 
+  /**
+   * Generic wire call to any remote domain (settings/credentials/llm/…),
+   * used by the model-config sync. Returns the ServerResponse's result
+   * (RpcResult semantics), with transport failures folded to RpcError.
+   */
+  async wireCall(method: string, payload: unknown): Promise<RpcResult<never>> {
+    try {
+      const response = await this.api.call(method, payload, this.abort.signal)
+      return response.result as RpcResult<never>
+    } catch (error) {
+      return { ok: false, error: transportError(error) }
+    }
+  }
+
   /** Probe reachability + handshake without starting a link (servers.add test). */
   static async probe(baseUrl: string): Promise<{ ok: true; version: string } | { ok: false; error: string }> {
     const api = new RemoteApiClient(baseUrl)
