@@ -321,9 +321,19 @@ export class ServerLink {
           })
           touched = true
           break
-        case 'approval/resolved':
+        case 'approval/resolved': {
+          // The resolved frame rides its own envelope, so its rpcId is not the
+          // one the request arrived under — the approvalId is the correlation.
+          for (const [key, row] of this.pendingMap) {
+            if (row.kind === 'approval' && row.approval?.approvalId === frame.approvalId) {
+              touched = this.pendingMap.delete(key) || touched
+            }
+          }
+          break
+        }
         case 'question/resolved':
-          touched = this.pendingMap.delete(envelope.rpcId)
+          // Questions echo the requesting envelope's rpcId back verbatim.
+          touched = this.pendingMap.delete(frame.questionRpcId)
           break
         case 'session/event':
           // Any event can move list facts (title, running, updatedAt, jobs).
