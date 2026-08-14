@@ -67,6 +67,12 @@ interface CacheFile {
    * process.
    */
   declined?: string[]
+  /**
+   * Imported session id → the real DSH session it was promoted to. Promoted
+   * copies stay hidden so a conversation that now lives in a real session is
+   * not also shown as an imported one.
+   */
+  promoted?: Record<string, string>
 }
 
 interface HistoryEvent {
@@ -254,6 +260,7 @@ export class ImportStore {
       // The declined list is a user decision, not scan output: it must
       // survive restarts or deleted workspaces reappear on the next boot.
       if (Array.isArray(parsed.declined)) this.cache.declined = parsed.declined
+      if (parsed.promoted && typeof parsed.promoted === 'object') this.cache.promoted = parsed.promoted
     } catch (error) {
       console.warn(`[dsh-session-hub] import cache read failed (${this.cachePath}):`, error)
     }
@@ -347,7 +354,24 @@ export class ImportStore {
   }
 
   /**
-   * Whether the user removed this project directory from the workspace list.
+   * Record that an imported session was promoted to a real DSH session.
+   *
+   * The imported copy is hidden from then on: the conversation now lives in a
+   * session the harness owns, and showing both would duplicate it in the
+   * tree. The mapping is persisted so the copy does not come back on restart.
+   *
+   * @param sessionId - the imported session id.
+   * @param realId - the DSH session it became.
+   */
+  markPromoted(sessionId: string, realId: string): void {
+    const promoted = this.cache.promoted ?? {}
+    if (promoted[sessionId] === realId) return
+    this.cache.promoted = { ...promoted, [sessionId]: realId }
+    void this.persist()
+  }
+
+  /**
+   * Whether a project directory was declined by the user.
    *
    * Deleting a workspace is a statement that the project should not be in the
    * tree; without remembering it, the next scan would adopt the directory
@@ -379,11 +403,15 @@ export class ImportStore {
    * Sessions whose project directory no longer exists are omitted: the work
    * they describe is gone, the directory cannot be adopted as a workspace,
    * and surfacing them only leaves dead groups in the tree. Directories the
-   * user removed from the workspace list are omitted for the same reason.
+   * user removed from the workspace list are omitted for the same reason, as
+   * are sessions already promoted to a real DSH session.
    */
   visible(): ImportedSession[] {
+    const promoted = this.cache.promoted ?? {}
     return [...this.sessions.values()]
-      .filter(s => this.projectExists(s.cwd) && !this.isDeclined(groupingPath(s.cwd).display))
+      .filter(s => promoted[s.sessionId] === undefined
+        && this.projectExists(s.cwd)
+        && !this.isDeclined(groupingPath(s.cwd).display))
       .sort((a, b) => b.updatedAt - a.updatedAt)
   }
 

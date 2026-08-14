@@ -19,6 +19,7 @@ import type { WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
 import { createHash } from 'node:crypto'
 import { normalizePath } from './import-common.ts'
 import { groupingPath } from './importer.ts'
+import { replayInto, type SessionStoreFace } from './promote.ts'
 import { isTrustedApiRequest } from './fence.ts'
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024
@@ -134,10 +135,14 @@ export class HubGateway {
     private readonly registry: ServerRegistry,
     private readonly trustedHosts: readonly string[],
     private readonly imports?: ImportStore,
+    /** The official session store, when the host exposes one. */
+    private readonly sessionStore?: () => SessionStoreFace | undefined,
   ) {}
 
   /** Project paths already offered to workspace.create (once per process). */
   private readonly materialized = new Set<string>()
+  /** Imported session id → the real session it was promoted to. */
+  private readonly promoted = new Map<string, string>()
 
   async handle(req: IncomingMessage, res: ServerResponse, method: string): Promise<void> {
     if (!isTrustedApiRequest(req, this.trustedHosts)) {
@@ -375,6 +380,44 @@ export class HubGateway {
     return { type: 'server-response', rpcId, result: { ok: true, value: { ...value, items } } }
   }
 
+  /**
+   * Promote an imported session to a real DSH session, once.
+   *
+   * The mapping is remembered so a second prompt (or a retry) continues the
+   * same session instead of minting another copy, and the imported original
+   * is hidden so the conversation does not appear twice in the tree.
+   *
+   * @param rpcId - the in-flight request id, reused for the nested call.
+   * @param sessionId - the imported session to promote.
+   * @returns the real session id, or undefined when promotion is unavailable.
+   */
+  private async promote(rpcId: RpcId, sessionId: string): Promise<string | undefined> {
+    const existing = this.promoted.get(sessionId)
+    if (existing !== undefined) return existing
+    const store = this.sessionStore?.()
+    const parsed = this.imports?.sessionById(sessionId)
+    if (store === undefined || parsed === undefined) return undefined
+    // Mint through the official create so the session gets this deployment's
+    // normal agent composition, cwd and workspace attachment.
+    const created = await this.callOfficial('session.create', rpcId, { cwd: parsed.cwd })
+    if (!created.result.ok) {
+      console.warn(`[dsh-session-hub] promotion could not create a session for ${sessionId}`)
+      return undefined
+    }
+    const realId = (created.result.value as { sessionId?: unknown }).sessionId
+    if (typeof realId !== 'string') return undefined
+    try {
+      const count = replayInto(store, realId, parsed)
+      this.promoted.set(sessionId, realId)
+      this.imports?.markPromoted(sessionId, realId)
+      console.info(`[dsh-session-hub] promoted ${parsed.tool} session ${sessionId} to ${realId} (${count} events)`)
+      return realId
+    } catch (error) {
+      console.warn(`[dsh-session-hub] replay failed for ${sessionId}:`, error)
+      return undefined
+    }
+  }
+
   /** Route one session method to the owning server, else the local host. */
   private async bySession(method: string, rpcId: RpcId, payload: { sessionId?: unknown }): Promise<RpcResponse<unknown>> {
     const sessionId = payload.sessionId
@@ -388,6 +431,16 @@ export class HubGateway {
           const events = this.imports.history(sessionId)
           if (events !== undefined) {
             return { type: 'server-response', rpcId, result: { ok: true, value: { events, hasMore: false } } }
+          }
+        }
+        // Sending a message is the point where browsing turns into working:
+        // promote the log to a real session the harness owns and let the
+        // prompt land there, so the user continues the conversation instead
+        // of being told it is read-only.
+        if (method === 'session.prompt') {
+          const promoted = await this.promote(rpcId, sessionId)
+          if (promoted !== undefined) {
+            return this.callOfficial(method, rpcId, { ...payload, sessionId: promoted })
           }
         }
         return {

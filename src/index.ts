@@ -32,7 +32,7 @@ export const name = 'dsh-session-hub'
 /** Services required before load: the Typert registry and the HTTP carrier. */
 // apiProxy in the inject list: cordis waits for the official ApiProxy
 // service before applying this plugin, so the gateway always sees it.
-export const inject = ['typert', 'webServer', 'apiProxy']
+export const inject = ['typert', 'webServer', 'apiProxy', 'sessions']
 
 /** Deployment configuration. */
 export interface Config {
@@ -114,6 +114,18 @@ export function apply(ctx: Context, config?: Config): void {
     registry,
     resolved.trustedHosts ?? [],
     importStore,
+    // Read lazily and defensively: promotion is an optional capability, and a
+    // deployment without a session store must still load the rest of the hub.
+    () => {
+      try {
+        const store = (ctx as unknown as { sessions?: unknown }).sessions
+        return typeof (store as { create?: unknown } | undefined)?.create === 'function'
+          ? store as never
+          : undefined
+      } catch {
+        return undefined
+      }
+    },
   )
 
   // Virtual-workspace live projection: the official client pulls workspace.list
