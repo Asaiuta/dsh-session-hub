@@ -305,7 +305,7 @@ async function scanJsonl(
 
 /** mtime-indexed, persisted, incremental external-session store. */
 export class ImportStore {
-  readonly sessions = new Map<string, ImportedSession>()
+  private sessions = new Map<string, ImportedSession>()
   private readonly cache: CacheFile
   private readonly cachePath: string
   private scanning = false
@@ -315,6 +315,13 @@ export class ImportStore {
   private watcher: ImportWatcher | undefined
   /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
   private dbLive = new Set<string>()
+  /** Notified when an already-known session grows new turns. */
+  private onGrowth: ((sessionId: string, event: unknown) => void) | undefined
+
+  /** How many external sessions are currently held. */
+  get size(): number {
+    return this.sessions.size
+  }
 
   constructor(dataFile: string) {
     this.cachePath = dataFile
@@ -538,7 +545,8 @@ export class ImportStore {
    * earlier versions that stored the raw control records.
    */
   private rebuildIndex(): void {
-    this.sessions.clear()
+    const previous = this.sessions
+    this.sessions = new Map<string, ImportedSession>()
     let changed = false
     const sanitized: ImportedSession[] = []
     for (const s of this.cache.sessions) {
@@ -554,6 +562,54 @@ export class ImportStore {
       this.cache.sessions = sanitized
       void this.persist()
     }
+    this.emitGrowth(previous)
+  }
+
+  /**
+   * Announce turns that appeared since the previous index.
+   *
+   * The tree learns about new sessions by re-reading `session.list`, but an
+   * *open* conversation only ever grows from `session/event` frames. Without
+   * this the watcher would keep the running dot honest while the transcript
+   * below it stayed frozen until the user reloaded the page.
+   *
+   * Only the tail is emitted, carrying the same seq numbering `buildHistory`
+   * assigns, so the official client's seq-dedup stitches it onto the history
+   * it already holds exactly as it does for a remote session.
+   *
+   * @param previous - the session index as it was before this rebuild.
+   */
+  private emitGrowth(previous: Map<string, ImportedSession>): void {
+    const emit = this.onGrowth
+    if (emit === undefined || previous.size === 0) return
+    for (const [id, next] of this.sessions) {
+      const before = previous.get(id)
+      if (before === undefined) continue
+      // Length is not a growth signal: a session at MAX_TURNS stays exactly
+      // that long forever, dropping its oldest turn for each new one. Compare
+      // the tail's timestamp instead, which only ever moves forward.
+      const lastBefore = before.turns[before.turns.length - 1]
+      const lastNext = next.turns[next.turns.length - 1]
+      if (lastNext === undefined) continue
+      if (lastBefore !== undefined && lastNext.time <= lastBefore.time) continue
+      const fresh = lastBefore === undefined
+        ? next.turns
+        : next.turns.filter(t => t.time > lastBefore.time)
+      if (fresh.length === 0) continue
+      // Emit only the new tail, numbered as buildHistory numbers the whole
+      // session, so the client's seq-dedup stitches it onto what it holds.
+      const full = buildHistory(next)
+      const tail = buildHistory({ ...next, turns: fresh })
+      for (const entry of full.slice(full.length - tail.length)) emit(id, entry.event)
+    }
+  }
+
+  /**
+   * Subscribe to turns appearing in already-known sessions.
+   * @param listener - receives the session id and one official history event.
+   */
+  onSessionGrowth(listener: (sessionId: string, event: unknown) => void): void {
+    this.onGrowth = listener
   }
 
   /** Persist the parsed cache (deferred debounce handled by caller). */

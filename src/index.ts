@@ -120,7 +120,7 @@ export function apply(ctx: Context, config?: Config): void {
   new SessionHubRuntime(ctx, registry, modelSync, importStore)
   if (importStore !== undefined) {
     void importStore.load().then(() => {
-      console.info(`[dsh-session-hub] imported ${importStore.sessions.size} external sessions`)
+      console.info(`[dsh-session-hub] imported ${importStore.size} external sessions`)
     }).catch((error: unknown) => {
       console.warn('[dsh-session-hub] importer load failed:', error)
     })
@@ -264,6 +264,17 @@ export function apply(ctx: Context, config?: Config): void {
   // frozen until the user reloads the page — the same class of bug as host
   // frames being routed into the mux entry.
   if (importStore !== undefined) {
+    // An open conversation grows only from `session/event` frames. The tree
+    // re-reads session.list and so notices new sessions on its own, but a
+    // transcript already on screen has no other way to learn that the source
+    // tool wrote another turn.
+    importStore.onSessionGrowth((sessionId, event) => {
+      registry.events.publish(sessionId as never, 'hub:imported', {
+        type: 'session/event',
+        sessionId,
+        event: event as { type: string, [key: string]: unknown },
+      })
+    })
     ctx.effect(() => {
       let last = new Set<string>()
       const timer = setInterval(() => {

@@ -44,7 +44,7 @@ interface HistoryEvent {
 }
 /** mtime-indexed, persisted, incremental external-session store. */
 export declare class ImportStore {
-    readonly sessions: Map<string, ImportedSession>;
+    private sessions;
     private readonly cache;
     private readonly cachePath;
     private scanning;
@@ -54,6 +54,10 @@ export declare class ImportStore {
     private watcher;
     /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
     private dbLive;
+    /** Notified when an already-known session grows new turns. */
+    private onGrowth;
+    /** How many external sessions are currently held. */
+    get size(): number;
     constructor(dataFile: string);
     /**
      * Attach the live-tail watcher. Kept out of the constructor so the store
@@ -112,6 +116,26 @@ export declare class ImportStore {
      * earlier versions that stored the raw control records.
      */
     private rebuildIndex;
+    /**
+     * Announce turns that appeared since the previous index.
+     *
+     * The tree learns about new sessions by re-reading `session.list`, but an
+     * *open* conversation only ever grows from `session/event` frames. Without
+     * this the watcher would keep the running dot honest while the transcript
+     * below it stayed frozen until the user reloaded the page.
+     *
+     * Only the tail is emitted, carrying the same seq numbering `buildHistory`
+     * assigns, so the official client's seq-dedup stitches it onto the history
+     * it already holds exactly as it does for a remote session.
+     *
+     * @param previous - the session index as it was before this rebuild.
+     */
+    private emitGrowth;
+    /**
+     * Subscribe to turns appearing in already-known sessions.
+     * @param listener - receives the session id and one official history event.
+     */
+    onSessionGrowth(listener: (sessionId: string, event: unknown) => void): void;
     /** Persist the parsed cache (deferred debounce handled by caller). */
     persist(): Promise<void>;
     sessionById(sessionId: string): ImportedSession | undefined;
