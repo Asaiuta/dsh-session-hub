@@ -18,6 +18,18 @@ export interface OfficialSessions {
         method: string;
         payload: unknown;
     }): void;
+    /**
+     * Host-frame sink. The sessions runtime handles `host/*` frames here — most
+     * importantly `host/session-status`, which drives the per-session running
+     * indicator. Routing a host frame into {@link handleMuxEnvelope} instead is
+     * silently ignored by the mux switch, which is why this face is required.
+     */
+    handleHostEnvelope(envelope: {
+        type: 'server-request';
+        rpcId: string;
+        method: string;
+        payload: unknown;
+    }): void;
 }
 /** The official workspaces runtime face (host-frame sink). */
 export interface OfficialWorkspaces {
@@ -29,9 +41,15 @@ export interface OfficialWorkspaces {
     }): void;
 }
 /**
- * Start relaying hub SSE frames into the official runtimes: mux frames into
- * the sessions runtime, and the hub-synthesized `host/workspace-*` frames
- * (virtual server groups) into the workspaces runtime.
+ * Start relaying hub SSE frames into the official runtimes, mirroring the
+ * official connection dispatch exactly: every `host/*` frame goes to BOTH
+ * `sessions.handleHostEnvelope` and `workspaces.handleHostEnvelope`, and
+ * every other (mux) frame goes to `sessions.handleMuxEnvelope`.
+ *
+ * The earlier split — only `host/workspace-*` treated as a host frame, all
+ * the rest funnelled into the mux entry — dropped `host/session-status` on
+ * the floor, so a remote session that finished while the UI was open kept
+ * spinning forever.
  * @param sessions - the official `ctx.sessions` service instance.
  * @param workspaces - the official `ctx.workspaces` service instance.
  * @returns the disposer (stop relaying).
