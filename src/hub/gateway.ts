@@ -18,9 +18,29 @@ import type { ImportStore } from './importer.ts'
 import type { WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
 import { createHash } from 'node:crypto'
 import { normalizePath } from './import-common.ts'
+import { groupingPath } from './importer.ts'
 import { isTrustedApiRequest } from './fence.ts'
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024
+
+/**
+ * The real project directory an imported session should be adopted under, or
+ * undefined when it has none.
+ *
+ * Grouping folds Codex's per-conversation scratch directories into a shared
+ * bucket; that bucket is a display grouping, not a project, so it is never
+ * registered as a workspace. Worktree copies report the project they mirror
+ * and are adopted through it rather than through their hashed path.
+ *
+ * @param cwd - the session's recorded working directory.
+ * @returns the directory to register, or undefined to leave it synthetic.
+ */
+function importProjectPath(cwd: string): string | undefined {
+  const group = groupingPath(cwd)
+  if (group.nameHint !== undefined) return undefined
+  if (group.normalized !== normalizePath(cwd)) return undefined
+  return group.display
+}
 
 /**
  * Synthetic workspace groups for imported sessions whose project directory
@@ -115,6 +135,9 @@ export class HubGateway {
     private readonly trustedHosts: readonly string[],
     private readonly imports?: ImportStore,
   ) {}
+
+  /** Project paths already offered to workspace.create (once per process). */
+  private readonly materialized = new Set<string>()
 
   async handle(req: IncomingMessage, res: ServerResponse, method: string): Promise<void> {
     if (!isTrustedApiRequest(req, this.trustedHosts)) {
@@ -229,7 +252,42 @@ export class HubGateway {
    * top-level group instead of the ungrouped bucket. Virtual views carry a
    * `dsh-hub://<serverId>` path and the server's display name as title.
    */
+  /**
+   * Register a real official workspace for every imported project directory
+   * that does not have one yet.
+   *
+   * Synthetic groups render fine but are not real workspaces, so official
+   * operations (rename, delete, starting a session in them) do not apply to
+   * them. `workspace.create` is idempotent and never creates directories — a
+   * path that no longer exists fails with `workspace-invalid-path` — so this
+   * only ever adopts directories the user really worked in.
+   *
+   * Each path is attempted once per process: a path the user subsequently
+   * deletes from the workspace list must stay deleted, and a failing path
+   * must not be retried on every list call.
+   *
+   * @param rpcId - the in-flight request id, reused for the nested calls.
+   */
+  private async materializeImportedProjects(rpcId: RpcId): Promise<void> {
+    const store = this.imports
+    if (store === undefined) return
+    const paths = new Set<string>()
+    for (const session of store.visible()) {
+      const path = importProjectPath(session.cwd)
+      if (path !== undefined && !this.materialized.has(normalizePath(path))) paths.add(path)
+    }
+    for (const path of paths) {
+      this.materialized.add(normalizePath(path))
+      try {
+        await this.callOfficial('workspace.create', rpcId, { path })
+      } catch (error) {
+        console.warn(`[dsh-session-hub] workspace.create failed for ${path}:`, error)
+      }
+    }
+  }
+
   private async workspaceList(rpcId: RpcId, payload: unknown): Promise<RpcResponse<unknown>> {
+    if (this.imports !== undefined) await this.materializeImportedProjects(rpcId)
     const local = await this.callOfficial('workspace.list', rpcId, payload)
     if (!local.result.ok || !Array.isArray((local.result.value as { items?: unknown }).items)) {
       return local

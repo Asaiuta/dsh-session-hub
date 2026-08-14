@@ -41,7 +41,7 @@ const CODEX_WORKTREE = /^.*\/\.codex\/worktrees\/[^/]+\/(.+)$/
  * @returns the grouping key, the path to display, and an optional project
  *   name to match against workspace basenames.
  */
-function groupingPath(cwd: string): { normalized: string; display: string; nameHint?: string } {
+export function groupingPath(cwd: string): { normalized: string; display: string; nameHint?: string } {
   const normalized = normalizePath(cwd)
   const chat = CODEX_CHAT_SCRATCH.exec(normalized)
   if (chat !== null) {
