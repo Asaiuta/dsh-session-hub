@@ -12,17 +12,35 @@ import type { HubSnapshot, PendingRow, RemoteSessionRow, ServerId, ServerView } 
 import { HubEventBus, newEventToken } from './events.ts'
 import { detectSelfLoop } from './self-loop.ts'
 import { ServerLink } from './server-link.ts'
+import { SshTunnel, type SshTarget } from './tunnel.ts'
 
-/** Persisted shape of the registry file. */
+/**
+ * Persisted shape of the registry file. An ssh-backed entry stores its target
+ * rather than a baseUrl: the local forward port is assigned by the OS on each
+ * start, so yesterday's URL means nothing today.
+ */
+interface StoredServer {
+  readonly id: ServerId
+  readonly name: string
+  /** Direct entries only. */
+  readonly baseUrl?: string
+  /** Tunnelled entries only. */
+  readonly ssh?: SshTarget
+}
+
 interface StoredRegistry {
   readonly version: 1
-  readonly servers: readonly { readonly id: ServerId; readonly name: string; readonly baseUrl: string }[]
+  readonly servers: readonly StoredServer[]
 }
 
 const STORAGE_VERSION = 1 as const
 
 export class ServerRegistry {
   private readonly links = new Map<ServerId, ServerLink>()
+  /** Tunnels keyed by the server they serve; absent for direct entries. */
+  private readonly tunnels = new Map<ServerId, SshTunnel>()
+  /** SSH targets keyed by server, so persist() can write them back. */
+  private readonly sshTargets = new Map<ServerId, SshTarget>()
   private readonly listeners = new Set<() => void>()
   private writeTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -58,6 +76,67 @@ export class ServerRegistry {
     return link.toView()
   }
 
+  /**
+   * Add a server reached over an SSH local forward. The tunnel comes up
+   * first, because its OS-assigned port is what the link's baseUrl is made
+   * of; a tunnel that cannot start is a failed add, not a dead entry.
+   */
+  async addSsh(name: string, target: SshTarget): Promise<ServerView> {
+    const id = randomUUID() as ServerId
+    const tunnel = new SshTunnel(target, () => this.onTunnelChange(id))
+    this.tunnels.set(id, tunnel)
+    this.sshTargets.set(id, target)
+    await tunnel.start()
+    const baseUrl = tunnel.baseUrl()
+    if (baseUrl === undefined) {
+      const reason = tunnel.status().error ?? 'the tunnel did not come up'
+      tunnel.stop()
+      this.tunnels.delete(id)
+      this.sshTargets.delete(id)
+      throw new Error(`tunnel: ${reason}`)
+    }
+    if (await detectSelfLoop(baseUrl, this.eventToken)) {
+      tunnel.stop()
+      this.tunnels.delete(id)
+      this.sshTargets.delete(id)
+      throw new Error('self-loop: refusing to link the hub to itself')
+    }
+    const link = new ServerLink(id, baseUrl, name, () => this.emitChange(), this.frameHook(id))
+    this.links.set(id, link)
+    this.schedulePersist()
+    link.start()
+    this.emitChange()
+    return link.toView()
+  }
+
+  /**
+   * A tunnel changed state. When it comes back on a different port the link
+   * is rebuilt against the new URL, which is what makes a dropped SSH
+   * session heal without the user touching anything.
+   */
+  private onTunnelChange(id: ServerId): void {
+    const tunnel = this.tunnels.get(id)
+    const link = this.links.get(id)
+    if (tunnel === undefined || link === undefined) {
+      this.emitChange()
+      return
+    }
+    const baseUrl = tunnel.baseUrl()
+    if (baseUrl !== undefined && baseUrl !== link.toView().baseUrl) {
+      const name = link.toView().name
+      link.stop()
+      const rebuilt = new ServerLink(id, baseUrl, name, () => this.emitChange(), this.frameHook(id))
+      this.links.set(id, rebuilt)
+      rebuilt.start()
+    }
+    this.emitChange()
+  }
+
+  /** Tunnel status for a server, if it has one. */
+  tunnelStatus(id: ServerId): { state: string; localPort?: number; error?: string } | undefined {
+    return this.tunnels.get(id)?.status()
+  }
+
   /** Update display name and/or endpoint; a baseUrl change rebuilds the link. */
   update(id: ServerId, patch: { name?: string; baseUrl?: string }): ServerView {
     const link = this.require(id)
@@ -81,6 +160,12 @@ export class ServerRegistry {
   }
 
   remove(id: ServerId): void {
+    const tunnel = this.tunnels.get(id)
+    if (tunnel !== undefined) {
+      tunnel.stop()
+      this.tunnels.delete(id)
+      this.sshTargets.delete(id)
+    }
     const link = this.links.get(id)
     if (link === undefined) return
     link.stop()
@@ -103,6 +188,9 @@ export class ServerRegistry {
   }
 
   dispose(): void {
+    for (const tunnel of this.tunnels.values()) tunnel.stop()
+    this.tunnels.clear()
+    this.sshTargets.clear()
     for (const link of this.links.values()) link.stop()
     this.links.clear()
     this.listeners.clear()
@@ -112,7 +200,28 @@ export class ServerRegistry {
   // ---- Reads ----
 
   serversList(): ServerView[] {
-    return [...this.links.values()].map(link => link.toView())
+    return [...this.links.values()].map(link => {
+      const view = link.toView()
+      const tunnel = this.tunnels.get(view.id)
+      const target = this.sshTargets.get(view.id)
+      if (tunnel === undefined || target === undefined) return view
+      const status = tunnel.status()
+      return {
+        ...view,
+        tunnel: {
+          state: status.state,
+          ...(status.localPort === undefined ? {} : { localPort: status.localPort }),
+          ...(status.error === undefined ? {} : { error: status.error }),
+          target: {
+            host: target.host,
+            username: target.username,
+            ...(target.port === undefined ? {} : { port: target.port }),
+            ...(target.privateKeyPath === undefined ? {} : { privateKeyPath: target.privateKeyPath }),
+            ...(target.remotePort === undefined ? {} : { remotePort: target.remotePort }),
+          },
+        },
+      }
+    })
   }
 
   /** Merged snapshot: servers, every session grouped by server, pending interactions. */
@@ -183,14 +292,37 @@ export class ServerRegistry {
       const parsed = JSON.parse(raw) as StoredRegistry
       if (parsed.version !== STORAGE_VERSION || !Array.isArray(parsed.servers)) return
       for (const entry of parsed.servers) {
-        if (typeof entry.id !== 'string' || typeof entry.name !== 'string' || typeof entry.baseUrl !== 'string') continue
+        if (typeof entry.id !== 'string' || typeof entry.name !== 'string') continue
+        const id = entry.id as ServerId
+
+        if (entry.ssh !== undefined) {
+          // Tunnelled entry: bring the forward up, then hang a link off
+          // whatever port it landed on. A tunnel that fails here keeps
+          // retrying in the background, so the entry recovers on its own
+          // once the network or the far end comes back.
+          const tunnel = new SshTunnel(entry.ssh, () => this.onTunnelChange(id))
+          this.tunnels.set(id, tunnel)
+          this.sshTargets.set(id, entry.ssh)
+          await tunnel.start()
+          const baseUrl = tunnel.baseUrl()
+          if (baseUrl === undefined) {
+            console.warn(`[dsh-session-hub] tunnel for "${entry.name}" is down: ${tunnel.status().error ?? 'unknown'}`)
+            continue
+          }
+          const link = new ServerLink(id, baseUrl, entry.name, () => this.emitChange(), this.frameHook(id))
+          this.links.set(id, link)
+          link.start()
+          continue
+        }
+
+        if (typeof entry.baseUrl !== 'string') continue
         const normalized = normalizeBaseUrl(entry.baseUrl)
         if (await detectSelfLoop(normalized, this.eventToken)) {
           console.warn(`[dsh-session-hub] skipping self-loop server "${entry.name}" (${normalized})`)
           continue
         }
-        const link = new ServerLink(entry.id as ServerId, normalized, entry.name, () => this.emitChange(), this.frameHook(entry.id as ServerId))
-        this.links.set(entry.id as ServerId, link)
+        const link = new ServerLink(id, normalized, entry.name, () => this.emitChange(), this.frameHook(id))
+        this.links.set(id, link)
         link.start()
       }
     } catch (error) {
@@ -216,7 +348,12 @@ export class ServerRegistry {
       version: STORAGE_VERSION,
       servers: [...this.links.values()].map(link => {
         const view = link.toView()
-        return { id: view.id, name: view.name, baseUrl: view.baseUrl }
+        const ssh = this.sshTargets.get(view.id)
+        // A tunnelled entry's baseUrl is this run's forward port, which is
+        // meaningless next time — persist the target instead.
+        return ssh === undefined
+          ? { id: view.id, name: view.name, baseUrl: view.baseUrl }
+          : { id: view.id, name: view.name, ssh }
       }),
     }
     try {

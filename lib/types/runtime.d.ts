@@ -59,7 +59,15 @@ export declare class SessionHubRuntime extends TypertRemoteService {
     }>;
     serversAdd(payload: {
         name: string;
-        baseUrl: string;
+        baseUrl?: string;
+        ssh?: {
+            host: string;
+            port?: number;
+            username: string;
+            privateKeyPath?: string;
+            passphrase?: string;
+            remotePort?: number;
+        };
     }): Promise<ServerView>;
     serversRemove(payload: {
         id: ServerId;
@@ -69,7 +77,15 @@ export declare class SessionHubRuntime extends TypertRemoteService {
     snapshot(_payload: Record<string, never>): HubSnapshot;
     /** Probe a candidate endpoint without adding it (used by the panel's Test button). */
     serversProbe(payload: {
-        baseUrl: string;
+        baseUrl?: string;
+        ssh?: {
+            host: string;
+            port?: number;
+            username: string;
+            privateKeyPath?: string;
+            passphrase?: string;
+            remotePort?: number;
+        };
     }): Promise<{
         ok: true;
         version: string;

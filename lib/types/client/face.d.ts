@@ -6,6 +6,15 @@
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import type { HistoryEntry } from '../contract.ts';
 import type { HubSnapshot, ImportSourceStatusView, ServerId, ServerView } from '../contract.ts';
+/** What the settings form collects for a tunnelled entry. */
+export interface SshTargetInput {
+    host: string;
+    port?: number;
+    username: string;
+    privateKeyPath?: string;
+    passphrase?: string;
+    remotePort?: number;
+}
 export type ProbeOutcome = {
     ok: true;
     version: string;
@@ -16,7 +25,8 @@ export type ProbeOutcome = {
 export interface SessionHubNamespaceFace {
     serversAdd(payload: {
         name: string;
-        baseUrl: string;
+        baseUrl?: string;
+        ssh?: SshTargetInput;
     }): Promise<RemoteResult<ServerView>>;
     serversRemove(payload: {
         id: ServerId;
@@ -24,7 +34,8 @@ export interface SessionHubNamespaceFace {
         removed: true;
     }>>;
     serversProbe(payload: {
-        baseUrl: string;
+        baseUrl?: string;
+        ssh?: SshTargetInput;
     }): Promise<RemoteResult<ProbeOutcome>>;
     snapshot(payload: Record<string, never>): Promise<RemoteResult<HubSnapshot>>;
     modelSync(payload: {

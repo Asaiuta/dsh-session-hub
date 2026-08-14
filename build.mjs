@@ -13,7 +13,10 @@ import { mkdirSync } from 'node:fs'
 
 mkdirSync('lib', { recursive: true })
 
-const dshExternal = ['@deepseek-ai/cordis', '@deepseek-ai/schemastery', '@deepseek-ai/dsh-*']
+// ssh2 stays external: it carries an optional native accelerator and loads
+// crypto bindings dynamically, neither of which survives bundling. It is a
+// real dependency, so the profile's install provides it.
+const dshExternal = ['@deepseek-ai/cordis', '@deepseek-ai/schemastery', '@deepseek-ai/dsh-*', 'ssh2']
 
 await build({
   entryPoints: ['src/index.ts'],

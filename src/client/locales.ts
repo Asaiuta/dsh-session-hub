@@ -67,6 +67,14 @@ export const en: HubDict = {
   probeOk: (version?: string): string => `Reachable — harness ${version ?? '?'}`,
   probeFail: (error?: string): string => `Unreachable: ${error ?? '?'}`,
   actionError: (error?: string): string => `Failed: ${error ?? '?'}`,
+  modeSsh: 'SSH tunnel',
+  modeDirect: 'Direct URL',
+  sshHost: 'Host (e.g. 10.0.0.5)',
+  sshUser: 'SSH user',
+  sshKey: 'Private key path (blank = ssh agent)',
+  sshRemotePort: 'Remote dsh port',
+  sshHint: 'The hub opens and supervises the tunnel; it closes when dsh exits.',
+  tunnelDown: 'tunnel down',
 }
 
 export const zh: HubDict = {
@@ -131,6 +139,14 @@ export const zh: HubDict = {
   probeOk: (version?: string): string => `可达 — harness ${version ?? '?'}`,
   probeFail: (error?: string): string => `不可达：${error ?? '?'}`,
   actionError: (error?: string): string => `操作失败：${error ?? '?'}`,
+  modeSsh: 'SSH 隧道',
+  modeDirect: '直连地址',
+  sshHost: '主机（如 10.0.0.5）',
+  sshUser: 'SSH 用户',
+  sshKey: '私钥路径（留空用 ssh agent）',
+  sshRemotePort: '远端 dsh 端口',
+  sshHint: '隧道由插件建立和保活，dsh 退出时一并关闭。',
+  tunnelDown: '隧道未连接',
 }
 
 export type HubKey = keyof typeof en

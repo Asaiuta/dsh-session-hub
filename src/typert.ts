@@ -22,9 +22,9 @@ export const TYPERT_MANIFEST: TypertContribution = {
         description: 'Aggregated multi-server session control: server registry, merged session snapshot, per-session history/actions, and approval/question answering.',
         tags: [],
         members: [
-          { kind: 'method', name: 'serversAdd', signature: 'serversAdd(payload: { name: string; baseUrl: string }): ServerView' },
+          { kind: 'method', name: 'serversAdd', signature: 'serversAdd(payload: { name: string; baseUrl?: string; ssh?: { host: string; port?: number; username: string; privateKeyPath?: string; passphrase?: string; remotePort?: number } }): ServerView' },
           { kind: 'method', name: 'serversRemove', signature: 'serversRemove(payload: { id: ServerId }): { removed: true }' },
-          { kind: 'method', name: 'serversProbe', signature: 'serversProbe(payload: { baseUrl: string }): { ok: true; version: string } | { ok: false; error: string }' },
+          { kind: 'method', name: 'serversProbe', signature: 'serversProbe(payload: { baseUrl?: string; ssh?: { host: string; port?: number; username: string; privateKeyPath?: string; passphrase?: string; remotePort?: number } }): { ok: true; version: string } | { ok: false; error: string }' },
           { kind: 'method', name: 'snapshot', signature: 'snapshot(payload: {}): HubSnapshot' },
           { kind: 'method', name: 'modelSync', signature: 'modelSync(payload: { serverId?: ServerId }): { synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }> }' },
           { kind: 'method', name: 'importStatus', signature: 'importStatus(payload: Record<string, never>): { sources: ImportSourceStatusView[] }' },

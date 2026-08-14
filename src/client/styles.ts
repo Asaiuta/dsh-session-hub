@@ -216,6 +216,24 @@ const CSS = `
   color: var(--dsw-alias-label-secondary, #9aa0ab);
   cursor: pointer;
 }
+
+.dsh-hub-modes { display: flex; gap: 4px; }
+.dsh-hub-mode {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2e38);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, inherit);
+  border-radius: 6px;
+}
+.dsh-hub-mode.active {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,0.06));
+  color: var(--dsw-alias-label-primary, inherit);
+  border-color: var(--dsw-alias-brand-primary, #4c8dff);
+}
 `
 
 let injected = false

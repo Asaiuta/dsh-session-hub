@@ -22,6 +22,9 @@
     "paths": {
       "@deepseek-ai/*": [
         "stubs/@deepseek-ai/*"
+      ],
+      "ssh2": [
+        "stubs/ssh2"
       ]
     },
     "types": [

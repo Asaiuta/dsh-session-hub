@@ -118,12 +118,24 @@ export class SessionHubRuntime extends TypertRemoteService {
   // ---- Server registry ----
 
   @Remote
-  async serversAdd(payload: { name: string; baseUrl: string }): Promise<ServerView> {
+  async serversAdd(payload: {
+    name: string
+    baseUrl?: string
+    ssh?: {
+      host: string; port?: number; username: string
+      privateKeyPath?: string; passphrase?: string; remotePort?: number
+    }
+  }): Promise<ServerView> {
     try {
-      const view = await this.registry.add(payload.name, payload.baseUrl)
+      const view = payload.ssh === undefined
+        ? await this.registry.add(payload.name, payload.baseUrl ?? '')
+        : await this.registry.addSsh(payload.name, payload.ssh)
       return out(view)
     } catch (error) {
-      return fail('self-loop', error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      // Tunnel failures are configuration problems the user can act on, so
+      // they get their own code rather than riding the self-loop one.
+      return fail(message.startsWith('tunnel:') ? 'tunnel' : 'self-loop', message)
     }
   }
 
@@ -142,9 +154,27 @@ export class SessionHubRuntime extends TypertRemoteService {
 
   /** Probe a candidate endpoint without adding it (used by the panel's Test button). */
   @Remote
-  serversProbe(payload: { baseUrl: string }):
-    Promise<{ ok: true; version: string } | { ok: false; error: string }> {
-    return import('./hub/server-link.ts').then(({ ServerLink }) => ServerLink.probe(payload.baseUrl).then(out))
+  async serversProbe(payload: {
+    baseUrl?: string
+    ssh?: {
+      host: string; port?: number; username: string
+      privateKeyPath?: string; passphrase?: string; remotePort?: number
+    }
+  }): Promise<{ ok: true; version: string } | { ok: false; error: string }> {
+    const { ServerLink } = await import('./hub/server-link.ts')
+    if (payload.ssh === undefined) {
+      return out(await ServerLink.probe(payload.baseUrl ?? ''))
+    }
+    // Probing a tunnelled target means standing the tunnel up, asking once,
+    // and tearing it down — the entry is not created yet.
+    const { probeTunnel } = await import('./hub/tunnel.ts')
+    const opened = await probeTunnel(payload.ssh)
+    if (!opened.ok) return out({ ok: false as const, error: opened.error })
+    try {
+      return out(await ServerLink.probe(opened.baseUrl))
+    } finally {
+      opened.close()
+    }
   }
 }
 

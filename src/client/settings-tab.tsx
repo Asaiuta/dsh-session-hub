@@ -300,6 +300,7 @@ export function SessionHubSettingsTab(props: {
             state={server.state}
             lastError={server.lastError}
             baseUrl={server.baseUrl}
+            tunnel={server.tunnel}
             sessionCount={sessions.filter(row => row.serverId === server.id).length}
           />
         ))}
@@ -314,16 +315,43 @@ function AddServerForm(props: {
 }): JSX.Element {
   const { hub, onDone } = props
   const [name, setName] = useState('')
+  const [mode, setMode] = useState<'ssh' | 'direct'>('ssh')
   const [baseUrl, setBaseUrl] = useState('')
+  const [sshHost, setSshHost] = useState('')
+  const [sshUser, setSshUser] = useState('')
+  const [sshKey, setSshKey] = useState('')
+  const [sshRemotePort, setSshRemotePort] = useState('3080')
   const [probe, setProbe] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  /**
+   * The remote's own `dsh web` only listens on its loopback, so an ssh entry
+   * is the normal case: the hub opens the forward itself and the user never
+   * picks a local port.
+   */
+  const sshTarget = (): { host: string; username: string; privateKeyPath?: string; remotePort?: number } => {
+    const port = Number.parseInt(sshRemotePort, 10)
+    return {
+      host: sshHost.trim(),
+      username: sshUser.trim(),
+      ...(sshKey.trim() === '' ? {} : { privateKeyPath: sshKey.trim() }),
+      ...(Number.isFinite(port) && port > 0 ? { remotePort: port } : {}),
+    }
+  }
+
+  const ready = mode === 'direct'
+    ? baseUrl.trim() !== ''
+    : sshHost.trim() !== '' && sshUser.trim() !== ''
+
+  const payload = (): { baseUrl?: string; ssh?: ReturnType<typeof sshTarget> } =>
+    mode === 'direct' ? { baseUrl: baseUrl.trim() } : { ssh: sshTarget() }
+
   const test = async (): Promise<void> => {
-    if (hub === undefined || baseUrl.trim() === '') return
+    if (hub === undefined || !ready) return
     setBusy(true)
     setProbe(null)
     try {
-      const result = await hub.serversProbe({ baseUrl: baseUrl.trim() })
+      const result = await hub.serversProbe(payload())
       setProbe(result.ok
         ? (result.value.ok ? tf('probeOk')(result.value.version) : tf('probeFail')(result.value.error))
         : tf('probeFail')(result.error.message))
@@ -335,13 +363,16 @@ function AddServerForm(props: {
   }
 
   const add = async (): Promise<void> => {
-    if (hub === undefined || name.trim() === '' || baseUrl.trim() === '') return
+    if (hub === undefined || name.trim() === '' || !ready) return
     setBusy(true)
     try {
-      const result = await hub.serversAdd({ name: name.trim(), baseUrl: baseUrl.trim() })
+      const result = await hub.serversAdd({ name: name.trim(), ...payload() })
       if (result.ok) {
         setName('')
         setBaseUrl('')
+        setSshHost('')
+        setSshUser('')
+        setSshKey('')
         setProbe(null)
         onDone()
       } else {
@@ -358,15 +389,33 @@ function AddServerForm(props: {
     <div className="dsh-hub-form">
       <input className="dsh-hub-input" placeholder={t('name')} value={name}
         onChange={e => setName(e.target.value)} />
-      <input className="dsh-hub-input" placeholder={t('url')} value={baseUrl}
-        onChange={e => setBaseUrl(e.target.value)} />
+      <div className="dsh-hub-modes">
+        <button type="button" className={`dsh-hub-mode${mode === 'ssh' ? ' active' : ''}`}
+          onClick={() => setMode('ssh')}>{t('modeSsh')}</button>
+        <button type="button" className={`dsh-hub-mode${mode === 'direct' ? ' active' : ''}`}
+          onClick={() => setMode('direct')}>{t('modeDirect')}</button>
+      </div>
+      {mode === 'direct'
+        ? <input className="dsh-hub-input" placeholder={t('url')} value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)} />
+        : <>
+            <input className="dsh-hub-input" placeholder={t('sshHost')} value={sshHost}
+              onChange={e => setSshHost(e.target.value)} />
+            <input className="dsh-hub-input" placeholder={t('sshUser')} value={sshUser}
+              onChange={e => setSshUser(e.target.value)} />
+            <input className="dsh-hub-input" placeholder={t('sshKey')} value={sshKey}
+              onChange={e => setSshKey(e.target.value)} />
+            <input className="dsh-hub-input" placeholder={t('sshRemotePort')} value={sshRemotePort}
+              onChange={e => setSshRemotePort(e.target.value)} />
+            <span className="dsh-hub-muted">{t('sshHint')}</span>
+          </>}
       <div className="dsh-hub-form-actions">
-        <button type="button" className="dsh-hub-btn" disabled={busy || baseUrl.trim() === ''}
+        <button type="button" className="dsh-hub-btn" disabled={busy || !ready}
           onClick={() => { void test() }}>
           {t('test')}
         </button>
         <button type="button" className="dsh-hub-btn primary"
-          disabled={busy || name.trim() === '' || baseUrl.trim() === ''}
+          disabled={busy || name.trim() === '' || !ready}
           onClick={() => { void add() }}>
           {t('add')}
         </button>
@@ -387,6 +436,7 @@ function ServerRow(props: {
   lastError?: string
   baseUrl: string
   sessionCount: number
+  tunnel?: { state: string; localPort?: number; error?: string; target: { host: string; username: string } }
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
 
@@ -407,7 +457,14 @@ function ServerRow(props: {
       <span className={`dsh-hub-dot ${props.state}`} />
       <span className="dsh-hub-server-name" title={props.baseUrl}>{props.name}</span>
       <span className="dsh-hub-muted dsh-hub-server-state">{t(stateLabel)}</span>
-      <span className="dsh-hub-muted dsh-hub-server-url" title={props.baseUrl}>{props.baseUrl}</span>
+      <span className="dsh-hub-muted dsh-hub-server-url" title={props.baseUrl}>
+        {props.tunnel === undefined
+          ? props.baseUrl
+          : `${props.tunnel.target.username}@${props.tunnel.target.host}`}
+      </span>
+      {props.tunnel !== undefined && props.tunnel.state !== 'up' && (
+        <span className="dsh-hub-error" title={props.tunnel.error ?? ''}>{t('tunnelDown')}</span>
+      )}
       <span className="dsh-hub-muted">{tf('sessionCount')(String(props.sessionCount))}</span>
       {props.state !== 'connected' && props.lastError !== undefined && (
         <span className="dsh-hub-error" title={props.lastError}>!</span>

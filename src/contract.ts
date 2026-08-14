@@ -23,6 +23,14 @@ export const serverStateSchema = z.enum(['connecting', 'connected', 'error', 'st
 export type ServerState = z.infer<typeof serverStateSchema>
 
 /** One configured remote server plus its live link facts. */
+export interface SshTargetView {
+  readonly host: string
+  readonly port?: number
+  readonly username: string
+  readonly privateKeyPath?: string
+  readonly remotePort?: number
+}
+
 export interface ServerView {
   readonly id: ServerId
   /** Display name chosen by the user. */
@@ -41,6 +49,17 @@ export interface ServerView {
   }
   /** Human-readable failure reason from the last failed generation. */
   readonly lastError?: string
+  /**
+   * Tunnel state for ssh-backed entries. Present only when the hub manages
+   * the forward itself, and worth surfacing separately: a tunnel that is
+   * down explains a dead link far better than the link's own timeout does.
+   */
+  readonly tunnel?: {
+    readonly state: string
+    readonly localPort?: number
+    readonly error?: string
+    readonly target: SshTargetView
+  }
 }
 
 /** One merged row: a session on a specific remote server. */
@@ -163,9 +182,21 @@ const hubSnapshotSchema = z.object({
   pending: z.array(pendingRowSchema),
 }).passthrough()
 
+/** An SSH local-forward target; the hub opens and supervises the tunnel. */
+const sshTargetSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().optional(),
+  username: z.string().min(1),
+  privateKeyPath: z.string().optional(),
+  passphrase: z.string().optional(),
+  remotePort: z.number().int().optional(),
+}).passthrough()
+
+/** Either a direct URL or an ssh target — the UI offers one or the other. */
 const serverAddPayloadSchema = z.object({
   name: z.string().min(1),
-  baseUrl: z.string().min(1),
+  baseUrl: z.string().optional(),
+  ssh: sshTargetSchema.optional(),
 }).passthrough()
 
 
@@ -231,7 +262,10 @@ const importActionPayloadSchema = z.object({
 
 
 
-const probePayloadSchema = z.object({ baseUrl: z.string().min(1) }).passthrough()
+const probePayloadSchema = z.object({
+  baseUrl: z.string().optional(),
+  ssh: sshTargetSchema.optional(),
+}).passthrough()
 
 const probeResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), version: z.string() }),
