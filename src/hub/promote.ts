@@ -82,6 +82,12 @@ export function replayInto(
           source: provenanceFor(session.tool),
         },
       }, { surfaceOp: 'append' })
+      // The source recorded the user interrupting this turn. DSH states that
+      // as the turn's end reason rather than as conversation text, and the
+      // cancel cause is exactly what the imported notice described.
+      if (parsed.aborted === true) {
+        live.append('turn/end', { turn, reason: { kind: 'aborted', reason: { kind: 'user' } } })
+      }
     }
     appended += 1
   }

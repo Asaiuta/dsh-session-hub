@@ -12,6 +12,12 @@ export interface ImportedTurn {
   role: 'user' | 'assistant'
   text: string
   time: number
+  /**
+   * The turn was recorded by the source tool as interrupted by the user.
+   * Carried separately because DSH expresses this as a `turn/end` reason,
+   * not as conversation text.
+   */
+  aborted?: boolean
 }
 
 export interface ImportedSession {
@@ -49,6 +55,49 @@ export function normalizePath(path: string): string {
 /** Truncate a turn's text to the per-turn cap. */
 export function capText(text: string): string {
   return text.length > MAX_TURN_CHARS ? `${text.slice(0, MAX_TURN_CHARS)}\n…(truncated)` : text
+}
+
+/**
+ * Control records the source tools write into the conversation stream as if
+ * they were user messages: Codex's interrupt notice, and Claude's slash
+ * command envelopes plus the local echo of their output.
+ *
+ * They are the tool talking to its own model, not anything the user said. Left
+ * in place they would enter the DSH model's context verbatim and imply an
+ * interruption or a command that never happened here.
+ */
+const ABORT_MARKER = /<turn_aborted>[\s\S]*?<\/turn_aborted>/g
+const COMMAND_ENVELOPE = /<command-(?:name|message|args)>[\s\S]*?<\/command-(?:name|message|args)>/g
+const LOCAL_COMMAND_OUTPUT = /<local-command-(?:stdout|stderr)>[\s\S]*?<\/local-command-(?:stdout|stderr)>/g
+
+/** One turn's conversation text separated from the control records around it. */
+export interface CleanedTurn {
+  /** The text a model should actually read; empty when the turn was pure control. */
+  text: string
+  /** The source tool recorded this turn as user-interrupted. */
+  aborted: boolean
+}
+
+/**
+ * Strip source-tool control records from one turn's text.
+ *
+ * The interrupt notice is not dropped silently: it is reported so the caller
+ * can record it the way DSH does, as a `turn/end` reason rather than as
+ * conversation.
+ *
+ * @param text - the raw turn text as the source tool stored it.
+ * @returns the conversational remainder and whether an interrupt was recorded.
+ */
+export function cleanTurnText(text: string): CleanedTurn {
+  const aborted = ABORT_MARKER.test(text)
+  ABORT_MARKER.lastIndex = 0
+  const stripped = text
+    .replace(ABORT_MARKER, ' ')
+    .replace(COMMAND_ENVELOPE, ' ')
+    .replace(LOCAL_COMMAND_OUTPUT, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+  return { text: stripped, aborted }
 }
 
 /**

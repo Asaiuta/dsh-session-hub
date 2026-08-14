@@ -18,7 +18,7 @@ import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy'
 import { parseCodexRollout } from './import-codex.ts'
 import { parseClaudeProject } from './import-claude.ts'
 import { scanOpencode } from './import-opencode.ts'
-import { normalizePath, type ImportedSession } from './import-common.ts'
+import { cleanTurnText, normalizePath, type ImportedSession, type ImportedTurn } from './import-common.ts'
 
 /**
  * Per-conversation scratch directories Codex creates under the user's home:
@@ -132,6 +132,41 @@ function toSummary(s: ImportedSession): SessionSummary {
       },
     },
   } as SessionSummary
+}
+
+/**
+ * Strip source-tool control records from a parsed session's turns.
+ *
+ * A turn that was nothing but a control record carries no conversation and is
+ * dropped; an interrupt notice is preserved as the turn's `aborted` flag so
+ * the promoter can record it as DSH does, through a `turn/end` reason.
+ *
+ * @param session - the parsed session as the source produced it.
+ * @returns the session with conversational turns only.
+ */
+function sanitize(session: ImportedSession): ImportedSession {
+  let dirty = false
+  const turns: ImportedTurn[] = []
+  for (const turn of session.turns) {
+    const cleaned = cleanTurnText(turn.text)
+    if (cleaned.aborted) {
+      // The notice reports that the turn *before* it was interrupted, so the
+      // flag attaches backwards. A notice with nothing before it describes an
+      // interruption this log never captured and is simply dropped.
+      const previous = turns[turns.length - 1]
+      if (previous !== undefined && previous.aborted !== true) {
+        turns[turns.length - 1] = { ...previous, aborted: true }
+      }
+      dirty = true
+    }
+    if (cleaned.text === '') {
+      dirty = true
+      continue
+    }
+    if (cleaned.text !== turn.text) dirty = true
+    turns.push({ ...turn, text: cleaned.text })
+  }
+  return dirty ? { ...session, turns } : session
 }
 
 /** Build foldable history events for an imported session. */
@@ -328,9 +363,31 @@ export class ImportStore {
     this.persist()
   }
 
+  /**
+   * Rebuild the id index from the parsed cache, sanitizing turns on the way
+   * in.
+   *
+   * Cleaning happens here rather than in each parser because every source
+   * funnels through this point, and because it also repairs caches written by
+   * earlier versions that stored the raw control records.
+   */
   private rebuildIndex(): void {
     this.sessions.clear()
-    for (const s of this.cache.sessions) this.sessions.set(s.sessionId, s)
+    let changed = false
+    const sanitized: ImportedSession[] = []
+    for (const s of this.cache.sessions) {
+      const clean = sanitize(s)
+      if (clean !== s) changed = true
+      sanitized.push(clean)
+      this.sessions.set(clean.sessionId, clean)
+    }
+    // Write the cleaned form back so the control records are stripped once
+    // rather than on every load, and so the abort flags they were converted
+    // into survive a restart.
+    if (changed) {
+      this.cache.sessions = sanitized
+      void this.persist()
+    }
   }
 
   /** Persist the parsed cache (deferred debounce handled by caller). */
