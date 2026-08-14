@@ -21,6 +21,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import { createHubEventsRoute } from './hub/events.ts'
 import { GATEWAY_METHODS, HubGateway } from './hub/gateway.ts'
 import { ModelSyncService } from './hub/model-sync.ts'
+import { ImportStore, type ImportSource } from './hub/importer.ts'
 import { ServerRegistry } from './hub/registry.ts'
 import { SessionHubRuntime } from './runtime.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
@@ -47,6 +48,11 @@ export interface Config {
    * only (SSH-tunnel deployments need nothing here).
    */
   trustedHosts?: string[]
+  /**
+   * External-tool session importers to enable. Default: all three
+   * (codex, claude, opencode).
+   */
+  importers?: ImportSource[]
 }
 
 /**
@@ -58,6 +64,7 @@ export const Config = z.object({
   // schemastery 3.x: fields are optional unless marked `.required()`.
   dataFile: z.string(),
   trustedHosts: z.array(z.string()),
+  importers: z.array(z.string()),
 })
 
 /**
@@ -75,6 +82,25 @@ export function apply(ctx: Context, config?: Config): void {
   const modelSync = new ModelSyncService(official, registry, dshHome)
   new SessionHubRuntime(ctx, registry, modelSync)
 
+  // External-tool session importer (codex / claude / opencode): parsed logs
+  // surface as read-only sessions in the official tree, matched into local
+  // workspaces by their project directory. Re-scan is incremental (mtime).
+  const importsFile = join(dshHome, 'plugins', 'dsh-session-hub-imports.json')
+  const importStore = new ImportStore(importsFile)
+  const configuredImporters = resolved.importers ?? []
+  const enabledImporters = (configuredImporters.length > 0 ? configuredImporters : ['codex', 'claude', 'opencode']) as ImportSource[]
+  void importStore.load(enabledImporters).then(() => {
+    console.info(`[dsh-session-hub] imported ${importStore.sessions.size} external sessions`)
+  }).catch((error: unknown) => {
+    console.warn('[dsh-session-hub] importer load failed:', error)
+  })
+  ctx.effect(() => {
+    const timer = setInterval(() => {
+      void importStore.rescan(enabledImporters).catch(() => {})
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, 'dsh-session-hub: importer watcher')
+
   // Aggregation gateway: exact-path routes (exact beats the official /api
   // prefix route) re-check the browser-trust fence, then route session
   // methods by ownership — remote sessions to their ServerLink, everything
@@ -85,6 +111,7 @@ export function apply(ctx: Context, config?: Config): void {
     official,
     registry,
     resolved.trustedHosts ?? [],
+    importStore,
   )
 
   // Virtual-workspace live projection: the official client pulls workspace.list

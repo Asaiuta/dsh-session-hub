@@ -14,6 +14,7 @@ import type {
   ApiProxy, ClientRequest, RpcId, RpcReceipt, RpcResponse,
 } from '@deepseek-ai/dsh-host-apiproxy'
 import type { ServerRegistry } from './registry.ts'
+import type { ImportStore } from './importer.ts'
 import { isTrustedApiRequest } from './fence.ts'
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024
@@ -80,6 +81,7 @@ export class HubGateway {
     private readonly official: () => ApiProxy,
     private readonly registry: ServerRegistry,
     private readonly trustedHosts: readonly string[],
+    private readonly imports?: ImportStore,
   ) {}
 
   async handle(req: IncomingMessage, res: ServerResponse, method: string): Promise<void> {
@@ -173,6 +175,13 @@ export class HubGateway {
         items.push(row.summary as unknown)
       }
     }
+    if (this.imports !== undefined) {
+      for (const summary of this.imports.rows()) {
+        if (seen.has(summary.sessionId)) continue
+        seen.add(summary.sessionId)
+        items.push(summary as unknown)
+      }
+    }
     items.sort((a, b) => {
       const ta = typeof a === 'object' && a !== null ? (a as { updatedAt?: unknown }).updatedAt : 0
       const tb = typeof b === 'object' && b !== null ? (b as { updatedAt?: unknown }).updatedAt : 0
@@ -199,6 +208,17 @@ export class HubGateway {
       : []
     const remoteArchived = this.registry.linkList().flatMap(link => link.archivedSessionIds())
     const archivedSessionIds = [...new Set([...localArchived, ...remoteArchived])]
+    const items = value.items.map(item => {
+      if (this.imports === undefined) return item
+      const path = typeof item === 'object' && item !== null ? (item as { path?: unknown }).path : undefined
+      if (typeof path !== 'string') return item
+      const imported = this.imports.idsForWorkspace(path)
+      if (imported.length === 0) return item
+      const sessionIds = Array.isArray((item as { sessionIds?: unknown }).sessionIds)
+        ? (item as { sessionIds: unknown[] }).sessionIds
+        : []
+      return { ...item as object, sessionIds: [...sessionIds, ...imported] }
+    })
     return {
       type: 'server-response',
       rpcId,
@@ -206,7 +226,7 @@ export class HubGateway {
         ok: true,
         value: {
           ...value,
-          items: [...value.items, ...this.virtualWorkspaceViews()],
+          items: [...items, ...this.virtualWorkspaceViews()],
           archivedSessionIds,
         },
       },
@@ -255,7 +275,31 @@ export class HubGateway {
     const sessionId = payload.sessionId
     if (typeof sessionId !== 'string') return this.callOfficial(method, rpcId, payload)
     const link = this.registry.findLinkBySession(sessionId)
-    if (link === undefined) return this.callOfficial(method, rpcId, payload)
+    if (link === undefined) {
+      // Imported external-tool sessions: history is served from the parsed
+      // logs; every other action is read-only and rejected.
+      if (this.imports !== undefined && this.imports.sessionById(sessionId) !== undefined) {
+        if (method === 'session.history') {
+          const events = this.imports.history(sessionId)
+          if (events !== undefined) {
+            return { type: 'server-response', rpcId, result: { ok: true, value: { events, hasMore: false } } }
+          }
+        }
+        return {
+          type: 'server-response',
+          rpcId,
+          result: {
+            ok: false,
+            error: {
+              code: 'import-readonly' as never,
+              message: `session ${sessionId} is an imported read-only session (${this.imports.sessionById(sessionId)?.tool}); it cannot be ${method.slice('session.'.length)}`,
+              details: {},
+            },
+          },
+        }
+      }
+      return this.callOfficial(method, rpcId, payload)
+    }
     const result = method === 'workspace.archiveSession'
       ? await link.wireCall(method, payload)
       : await link.invoke(method, payload as Record<string, unknown>)
