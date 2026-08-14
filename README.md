@@ -94,6 +94,7 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 |---|---|---|---|
 | `dataFile` | `string?` | `$DSH_HOME/plugins/dsh-session-hub.json` | 服务器注册表持久化位置 |
 | `trustedHosts` | `string[]?` | 仅环回 | 网关拦截的 `/api` 再校验白名单（裸 `host[:port]`，格式同 `client-connection.trustedHosts`；SSH 隧道部署无需配置） |
+| `importers` | `string[]?` | `codex`,`claude`,`opencode` | 外部会话导入源（设为空数组关闭） |
 
 在 profile 的 `cordis.yml` / `cordis.patch.yml` 中配置：
 
@@ -114,7 +115,8 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 
 **文件访问**：
 - 读/写 `$DSH_HOME/plugins/dsh-session-hub.json`（`0600`，原子写：tmp + rename）；
-- 不读取任何会话文件、配置、凭据文件。
+- 读/写 `$DSH_HOME/plugins/dsh-session-hub-imports.json`（导入会话解析缓存，`0600`）；
+- 只读扫描本机会话日志：`~/.codex/sessions/**/rollout-*.jsonl`、`~/.claude/projects/**/*.jsonl`、`~/.local/share/opencode/opencode.db`（SQLite 只读打开），用于生成**只读**的导入会话视图；绝不写回这些文件。
 
 **网络**：
 - 出站（对每个已配置服务器 `baseUrl`）：HTTP `POST /api/*`（unary RPC）+ WebSocket 升级 `/api/events.mux`、`/api/events.host`；
