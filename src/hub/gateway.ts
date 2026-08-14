@@ -274,7 +274,10 @@ export class HubGateway {
     const paths = new Set<string>()
     for (const session of store.visible()) {
       const path = importProjectPath(session.cwd)
-      if (path !== undefined && !this.materialized.has(normalizePath(path))) paths.add(path)
+      if (path === undefined) continue
+      if (this.materialized.has(normalizePath(path))) continue
+      if (store.isDeclined(path)) continue
+      paths.add(path)
     }
     for (const path of paths) {
       this.materialized.add(normalizePath(path))
@@ -454,12 +457,44 @@ export class HubGateway {
    * workspace.delete on a virtual server group removes the server connection
    * (config entry included); everything else stays official.
    */
+  /**
+   * workspace.delete on a virtual server group removes the server connection
+   * (config entry included); everything else stays official.
+   *
+   * Deleting a workspace that holds imported sessions also records the
+   * project as declined, so adoption does not re-create it on the next list
+   * and the sessions do not reappear as a synthetic group.
+   */
   private async deleteWorkspace(rpcId: RpcId, payload: { workspaceId?: unknown }): Promise<RpcResponse<unknown>> {
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : undefined
     const link = workspaceId === undefined ? undefined : this.registry.link(workspaceId as never)
-    if (link === undefined) return this.callOfficial('workspace.delete', rpcId, payload)
+    if (link === undefined) {
+      const path = workspaceId === undefined ? undefined : await this.workspacePath(rpcId, workspaceId)
+      const result = await this.callOfficial('workspace.delete', rpcId, payload)
+      if (result.result.ok && path !== undefined) this.imports?.decline(path)
+      return result
+    }
     this.registry.remove(workspaceId as never)
     return { type: 'server-response', rpcId, result: { ok: true, value: { deleted: true } } }
+  }
+
+  /**
+   * The directory behind a workspace id, read from the official registry.
+   * @param rpcId - the in-flight request id, reused for the nested call.
+   * @param workspaceId - the workspace to resolve.
+   * @returns the path, or undefined when the id is unknown.
+   */
+  private async workspacePath(rpcId: RpcId, workspaceId: string): Promise<string | undefined> {
+    const listed = await this.callOfficial('workspace.list', rpcId, {})
+    if (!listed.result.ok) return undefined
+    const items = (listed.result.value as { items?: unknown }).items
+    if (!Array.isArray(items)) return undefined
+    for (const item of items) {
+      if (typeof item !== 'object' || item === null) continue
+      const row = item as { workspaceId?: unknown; path?: unknown }
+      if (row.workspaceId === workspaceId && typeof row.path === 'string') return row.path
+    }
+    return undefined
   }
 
   /** Route a client response to the remote server holding the pending rpcId. */

@@ -61,6 +61,12 @@ export type ImportSource = 'codex' | 'claude' | 'opencode'
 interface CacheFile {
   files: Record<string, number>
   sessions: ImportedSession[]
+  /**
+   * Project directories the user removed from the workspace list. Adoption
+   * must not resurrect them on the next scan, so the refusal outlives the
+   * process.
+   */
+  declined?: string[]
 }
 
 interface HistoryEvent {
@@ -245,6 +251,9 @@ export class ImportStore {
         restored = parsed.sessions.length
       }
       if (parsed.files && typeof parsed.files === 'object') this.cache.files = parsed.files
+      // The declined list is a user decision, not scan output: it must
+      // survive restarts or deleted workspaces reappear on the next boot.
+      if (Array.isArray(parsed.declined)) this.cache.declined = parsed.declined
     } catch (error) {
       console.warn(`[dsh-session-hub] import cache read failed (${this.cachePath}):`, error)
     }
@@ -338,15 +347,43 @@ export class ImportStore {
   }
 
   /**
+   * Whether the user removed this project directory from the workspace list.
+   *
+   * Deleting a workspace is a statement that the project should not be in the
+   * tree; without remembering it, the next scan would adopt the directory
+   * again and the group would reappear.
+   *
+   * @param path - the project directory.
+   * @returns true when the path must stay out of the tree.
+   */
+  isDeclined(path: string): boolean {
+    return (this.cache.declined ?? []).includes(normalizePath(path))
+  }
+
+  /**
+   * Record that the user removed a project directory from the tree.
+   * @param path - the project directory to stop surfacing.
+   */
+  decline(path: string): void {
+    const key = normalizePath(path)
+    if (key === '') return
+    const declined = this.cache.declined ?? []
+    if (declined.includes(key)) return
+    this.cache.declined = [...declined, key]
+    void this.persist()
+  }
+
+  /**
    * Imported sessions visible to the official UI, newest first.
    *
    * Sessions whose project directory no longer exists are omitted: the work
    * they describe is gone, the directory cannot be adopted as a workspace,
-   * and surfacing them only leaves dead groups in the tree.
+   * and surfacing them only leaves dead groups in the tree. Directories the
+   * user removed from the workspace list are omitted for the same reason.
    */
   visible(): ImportedSession[] {
     return [...this.sessions.values()]
-      .filter(s => this.projectExists(s.cwd))
+      .filter(s => this.projectExists(s.cwd) && !this.isDeclined(groupingPath(s.cwd).display))
       .sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
