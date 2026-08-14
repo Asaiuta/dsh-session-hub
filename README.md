@@ -33,13 +33,15 @@
 
 ## Install / Uninstall
 
-### 安装（npm 分发）
+### 安装（推荐：版本化 tarball）
 
 ```bash
-dsh plugin --profile web add dsh-session-hub
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
 ```
 
-（等价于在 `~/.dsh/profiles/web` 目录执行 `pnpm add dsh-session-hub`；本机需要 pnpm。）随后**重启 `dsh web`**。浏览器界面 **设置 → 插件** 中多出 **Session Hub** 标签页即安装成功。
+`dsh plugin` 把参数原样转发给 profile 目录里的 pnpm（本机需要 pnpm）。随后**重启 `dsh web`**（`kill -TERM <pid>` 并等待退出，勿用 `kill -9`：会在写入中途撕裂会话 zstd 日志），刷新页面。浏览器 **设置 → 插件** 中出现 **会话枢纽 / Session Hub** 标签页即安装成功。
+
+仓库已提交构建产物（`lib/`），因此 tarball 安装无需在本机构建 —— pnpm 对 tarball 依赖不执行 `prepare`。
 
 ### 安装（本地源码 / 开发）
 
@@ -52,7 +54,8 @@ dsh plugin --profile web add file:/path/to/dsh-session-hub
 ### 升级
 
 ```bash
-dsh plugin --profile web add dsh-session-hub@<新版本>   # 或重跑 add file:...（源码方式重新构建）
+# 换成新版本的 tarball URL 重跑 add；或源码方式重跑 add file:...
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v<新版本>.tar.gz
 # 重启 dsh web 生效
 ```
 
