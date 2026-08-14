@@ -31,7 +31,7 @@ const CSS = `
   min-height: 16px;
 }
 .dsh-hub-live-on {
-  color: var(--dsw-status-success-fg, #3ecf8e);
+  color: var(--dsw-alias-state-success-primary, #3ecf8e);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -98,9 +98,9 @@ const CSS = `
   background: var(--dsw-alias-label-tertiary, #555);
   flex: none;
 }
-.dsh-hub-dot.connected { background: var(--dsw-status-success-fg, #3ecf8e); }
-.dsh-hub-dot.error { background: var(--dsw-status-danger-fg, #e5534b); }
-.dsh-hub-dot.connecting { background: var(--dsw-status-warning-fg, #d29922); animation: dsh-hub-pulse 1s infinite alternate; }
+.dsh-hub-dot.connected { background: var(--dsw-alias-state-success-primary, #3ecf8e); }
+.dsh-hub-dot.error { background: var(--dsw-alias-state-error-primary, #e5534b); }
+.dsh-hub-dot.connecting { background: var(--dsw-alias-state-warn-primary, #d29922); animation: dsh-hub-pulse 1s infinite alternate; }
 @keyframes dsh-hub-pulse { from { opacity: 0.35; } to { opacity: 1; } }
 .dsh-hub-server-name {
   flex: 1;
@@ -126,8 +126,12 @@ const CSS = `
 }
 .dsh-hub-btn:hover { background: var(--dsw-alias-interactive-bg-hover, #1d2129); color: var(--dsw-alias-label-primary, inherit); }
 .dsh-hub-btn:disabled { opacity: 0.45; cursor: default; }
-.dsh-hub-btn.primary { background: var(--dsw-accent-ui, var(--dsh-hub-accent, #4c8dff)); border-color: transparent; color: #fff; }
-.dsh-hub-btn.primary:hover { background: var(--dsw-accent-ui-hover, var(--dsh-hub-accent, #4c8dff)); }
+.dsh-hub-btn.primary {
+  background: var(--dsw-alias-button-primary-fill, var(--dsh-hub-accent, #4c8dff));
+  border-color: transparent;
+  color: var(--dsw-alias-label-primary-inverted, #fff);
+}
+.dsh-hub-btn.primary:hover { filter: brightness(1.08); }
 .dsh-hub-btn.icon {
   padding: 1px;
   width: 22px;
@@ -135,7 +139,7 @@ const CSS = `
   border-radius: 6px;
 }
 .dsh-hub-input {
-  background: var(--dsw-alias-input-fill, #101216);
+  background: var(--dsw-alias-bg-layer-1, #101216);
   border: 1px solid var(--dsw-alias-border-l2, #2a2e38);
   color: var(--dsw-alias-label-primary, inherit);
   border-radius: 6px;
@@ -144,7 +148,7 @@ const CSS = `
   width: 100%;
   font-family: inherit;
 }
-.dsh-hub-input:focus { outline: none; border-color: var(--dsw-accent-ui, #4c8dff); }
+.dsh-hub-input:focus { outline: none; border-color: var(--dsw-alias-brand-primary, #4c8dff); }
 .dsh-hub-form {
   display: flex;
   flex-direction: column;
@@ -154,8 +158,8 @@ const CSS = `
   border-radius: 8px;
 }
 .dsh-hub-form-actions { display: flex; gap: 6px; }
-.dsh-hub-error { color: var(--dsw-status-danger-fg, #e5534b); font-size: 11px; }
-.dsh-hub-live-off { color: var(--dsw-status-danger-fg, #e5534b); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.dsh-hub-error { color: var(--dsw-alias-state-error-primary, #e5534b); font-size: 11px; }
+.dsh-hub-live-off { color: var(--dsw-alias-state-error-primary, #e5534b); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
 
 /* Settings tab: model-sync card subtext and result line. */
 .dsh-hub-settings-sub {
