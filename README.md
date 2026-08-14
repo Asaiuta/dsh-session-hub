@@ -286,6 +286,56 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 
 </details>
 
+## 和其他插件共存
+
+生态里已经有 1800+ 个 dsh 插件，其中不少也改前端。**关键在于这个插件改的是数据层，不是画面层**：
+
+| 层 | 谁在改 | 冲突吗 |
+|---|---|---|
+| 会话/工作区**数据** | 本插件（网关合并 `session.list` / `workspace.list`） | 与 UI 插件不冲突 |
+| 侧边栏/对话区**画面** | 各类 UI 插件（换树、换主题、加 Tab） | 本插件一个都不占 |
+
+本插件在浏览器侧只做一件事：往 `settings.plugins.tab` 这个 **list 槽**加一个 `id: 'session-hub'` 的条目。
+不 shadow `sidebar.workspaces`，不 shadow `conversation`，不碰任何单槽 —— 所以换侧边栏、换对话区、换主题的插件都能与它并存。
+
+**换树的插件反而会自动显示远端与导入的会话**：它们通过官方 `useSessions` / `useWorkspaces` 取数，
+而这两个 hook 的上游正是本插件合并过的 `/api`。例如 `dsh-plugin-ya-workspace-sidebar` 完整替换了
+`sidebar.workspaces`，本插件的服务器分组和导入会话照样出现在它画的树里 —— 双方互不知情。
+
+<details>
+<summary><b>唯一真正的冲突：也拦截 <code>/api</code> 的插件</b></summary>
+
+DSH 的 web server 对同一条 exact 路径只允许一个注册者（重复注册直接抛错，这是刻意的组合约定）。
+本插件为实现会话合并，接管了这些路径：
+
+```
+/api/session.list      /api/session.history   /api/session.prompt    /api/session.cancel
+/api/session.rename    /api/session.fork      /api/session.models    /api/session.selectModel
+/api/session.updateQueue  /api/session.attachment  /api/session.search  /api/session.create
+/api/workspace.list    /api/workspace.rename  /api/workspace.delete  /api/workspace.archiveSession
+/api/respond
+```
+
+另一个插件若也拦截其中任意一条，本插件会**让出已占的路由并降级**，`dsh` 与对方插件照常运行：
+
+```
+[dsh-session-hub] gateway DISABLED — webserver: duplicate exact route "/api/respond".
+Another plugin intercepts the same route, so remote servers and imported sessions will not appear.
+Set features.aggregate and features.importer to false to silence this, or remove the conflicting plugin.
+```
+
+此时远端会话与导入会话不会出现（这两项功能依赖那些路由），但 DSH 本身、对方插件、以及本插件的设置页都正常。
+把 `features.aggregate` 与 `features.importer` 设为 `false` 可消除这条告警。
+
+> 这条路径实机验证过：用一个抢占 `/api/respond` 的测试插件复现，`dsh` 首页仍 `200`、官方 `session.list` 正常应答、
+> `sessionHub` 端点存活 —— **路由撞车不会拖垮宿主**。
+
+绝大多数插件不走这条路：加工具、加技能、加 UI、加 Tab 都不需要拦截 `/api`。
+
+</details>
+
+**Typert 命名空间**：本插件独占 `sessionHub`（对应 `/api/sessionHub/*`），SSE 独占 `/hub/events`。命名空间撞车的可能性极低。
+
 ## 常见问题
 
 | 症状 | 原因 / 处理 |

@@ -167,17 +167,40 @@ export function apply(ctx: Context, config?: Config): void {
   if (gateway !== undefined) {
     ctx.effect(() => {
       const disposers: (() => void)[] = []
-      for (const method of GATEWAY_METHODS) {
-        const route = {
-          kind: 'exact' as const,
-          path: `/api/${method}`,
-          handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): void => {
-            void gateway.handle(req, res, method)
-          },
+      const release = (): void => { for (const dispose of disposers) dispose() }
+      try {
+        for (const method of GATEWAY_METHODS) {
+          const route = {
+            kind: 'exact' as const,
+            path: `/api/${method}`,
+            handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): void => {
+              void gateway.handle(req, res, method)
+            },
+          }
+          disposers.push(ctx.webServer.register(route as never))
         }
-        disposers.push(ctx.webServer.register(route as never))
+      } catch (error: unknown) {
+        // Another plugin already owns one of these paths: the web server
+        // refuses a duplicate exact route on purpose. Give back the ones we
+        // did take — a half-installed gateway would answer some session
+        // methods and not others, which breaks the harness worse than not
+        // loading at all.
+        //
+        // Then stop, rather than throw. An exception here fails the whole
+        // loader entry, which fails the plugin tree, which leaves the user
+        // with no dsh at all — a route collision between two plugins must
+        // not take the harness down. The rest of this plugin keeps working;
+        // only the halves that need the gateway go quiet, and the log says
+        // exactly which route and how to configure around it.
+        release()
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error(
+          `[dsh-session-hub] gateway DISABLED — ${detail}. Another plugin intercepts the same route, `
+          + 'so remote servers and imported sessions will not appear. Set features.aggregate and '
+          + 'features.importer to false to silence this, or remove the conflicting plugin.',
+        )
       }
-      return () => { for (const dispose of disposers) dispose() }
+      return release
     }, 'dsh-session-hub: /api gateway routes')
   }
 
@@ -222,7 +245,18 @@ export function apply(ctx: Context, config?: Config): void {
   // Live event SSE: browser clients stream remote mux/host frames here.
   ctx.effect(() => {
     const route = createHubEventsRoute(registry.events, registry.eventToken)
-    return ctx.webServer.register(route)
+    try {
+      return ctx.webServer.register(route)
+    } catch (error: unknown) {
+      // Same rule as the gateway routes: losing a path to another plugin
+      // costs this plugin its live stream, not the user their harness.
+      // Sessions still open and send; they fall back to polling.
+      console.error(
+        `[dsh-session-hub] live stream DISABLED — ${error instanceof Error ? error.message : String(error)}. `
+        + 'Remote sessions still work, but updates arrive on refresh instead of live.',
+      )
+      return () => {}
+    }
   }, 'dsh-session-hub: /hub/events route')
 
   // Incremental model-config sync: every 3s, sync a server once right after
