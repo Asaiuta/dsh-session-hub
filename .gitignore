@@ -1,3 +1,5 @@
 node_modules/
-lib/
 *.log
+# Build output is committed so tarball installs work without a build
+# step (pnpm does not run `prepare` for tarball deps); sourcemaps are not.
+lib/**/*.map
