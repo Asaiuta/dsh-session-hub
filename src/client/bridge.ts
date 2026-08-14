@@ -20,6 +20,18 @@ export interface OfficialSessions {
     method: string
     payload: unknown
   }): void
+  /**
+   * Host-frame sink. The sessions runtime handles `host/*` frames here — most
+   * importantly `host/session-status`, which drives the per-session running
+   * indicator. Routing a host frame into {@link handleMuxEnvelope} instead is
+   * silently ignored by the mux switch, which is why this face is required.
+   */
+  handleHostEnvelope(envelope: {
+    type: 'server-request'
+    rpcId: string
+    method: string
+    payload: unknown
+  }): void
 }
 
 /** The official workspaces runtime face (host-frame sink). */
@@ -33,9 +45,15 @@ export interface OfficialWorkspaces {
 }
 
 /**
- * Start relaying hub SSE frames into the official runtimes: mux frames into
- * the sessions runtime, and the hub-synthesized `host/workspace-*` frames
- * (virtual server groups) into the workspaces runtime.
+ * Start relaying hub SSE frames into the official runtimes, mirroring the
+ * official connection dispatch exactly: every `host/*` frame goes to BOTH
+ * `sessions.handleHostEnvelope` and `workspaces.handleHostEnvelope`, and
+ * every other (mux) frame goes to `sessions.handleMuxEnvelope`.
+ *
+ * The earlier split — only `host/workspace-*` treated as a host frame, all
+ * the rest funnelled into the mux entry — dropped `host/session-status` on
+ * the floor, so a remote session that finished while the UI was open kept
+ * spinning forever.
  * @param sessions - the official `ctx.sessions` service instance.
  * @param workspaces - the official `ctx.workspaces` service instance.
  * @returns the disposer (stop relaying).
@@ -49,15 +67,21 @@ export function startOfficialBridge(
     const type = typeof frame === 'object' && frame !== null
       ? (frame as { type?: unknown }).type
       : undefined
-    if (typeof type === 'string' && type.startsWith('host/workspace-')) {
+    if (typeof type === 'string' && type.startsWith('host/')) {
+      const envelope = {
+        type: 'server-request' as const,
+        rpcId,
+        method: 'events.host',
+        payload: frame,
+      }
+      try {
+        sessions.handleHostEnvelope(envelope)
+      } catch (error) {
+        console.error('[dsh-session-hub] official sessions host frame rejected:', error)
+      }
       if (workspaces !== undefined) {
         try {
-          workspaces.handleHostEnvelope({
-            type: 'server-request',
-            rpcId,
-            method: 'events.host',
-            payload: frame,
-          })
+          workspaces.handleHostEnvelope(envelope)
         } catch (error) {
           console.error('[dsh-session-hub] official workspaces frame rejected:', error)
         }
@@ -91,7 +115,8 @@ export function workspacesOf(context: unknown): OfficialWorkspaces | undefined {
 export function sessionsOf(context: unknown): OfficialSessions | undefined {
   const candidate = (context as { sessions?: unknown }).sessions
   if (candidate !== undefined
-    && typeof (candidate as { handleMuxEnvelope?: unknown }).handleMuxEnvelope === 'function') {
+    && typeof (candidate as { handleMuxEnvelope?: unknown }).handleMuxEnvelope === 'function'
+    && typeof (candidate as { handleHostEnvelope?: unknown }).handleHostEnvelope === 'function') {
     return candidate as OfficialSessions
   }
   return undefined
