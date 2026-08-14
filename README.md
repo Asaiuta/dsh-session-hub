@@ -1,98 +1,153 @@
+<div align="center">
+
 # dsh-session-hub
 
-> ⚠️ **Alpha** — `0.1.0-alpha.1`：协议与 API 仍在演进。核心链路（网关路由 / 官方 UI 桥接 / 实时帧注入 / 审批应答）已实机验证，但配置格式与安全边界可能变化。
+**一个界面，管所有机器的 DSH 会话。**
 
-## Overview
+多台服务器的会话汇进本机官方 Web UI —— 侧边栏零改动、对话区零替换。
+顺手把 Codex CLI / Claude Code / opencode 的历史对话也接进来。
 
-**在单个 DSH Web UI 里聚合并原生操控多台 DeepSeek Harness 服务器的会话。**
+<a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+<img alt="alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
+<img alt="node" src="https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-3c873a?style=flat-square">
+<img alt="DSH" src="https://img.shields.io/badge/DSH-0.1.0--rc.6-4b6fff?style=flat-square">
 
-这个插件把若干台远端 `dsh web` 部署的会话聚合进你本机的官方界面：
+</div>
 
-- **官方侧边栏树零改动**：每台服务器自动成为官方工作区树中的一个分组（虚拟 workspace，`workspace.list` 合并 + 合成 `host/workspace-changed` 帧实时同步），会话点击即打开；树内操作全为原生语义：虚拟组 **+ 新建会话** 在对应服务器上创建、会话菜单 **归档/删除** 路由到所在服务器、**重命名** 虚拟组 = 重命名服务器、**删除** 虚拟组 = 移除该服务器连接（均带官方确认弹窗）；
-- **官方对话区零替换**：远端的会话历史、实时逐 token 流、审批/提问卡片全部由官方组件渲染，插件只做数据桥接；
-- **设置 → 插件 → Session Hub**：服务器连接管理（增删/状态/探活、远端新建会话、模型配置同步）。侧边栏零改动；
-- **外部会话导入（按软件手动开启）**：把本机 Codex CLI / Claude Code / opencode 的历史对话读进官方目录树，按项目目录自动归入对应工作区。默认不读取任何日志——在 设置 → 插件 → Session Hub 里逐个软件点「导入」才生效，可单独开关「自动」跟进新会话。导入会话为只读，点击继续对话时自动转为真实 DSH 会话；
-- **模型配置增量同步**：服务器连上后自动把本机缺失于远端的模型提供方（`llm-*` 命名空间）、默认模型与未配置的 API Key 增量推送到远端——只补缺、不覆盖远端已有配置，密钥走 `credentials.set` 单一出站方向。
+> [!WARNING]
+> **Alpha（`0.1.0-alpha.1`）**：核心链路已实机验证（网关路由 / 官方 UI 桥接 / 实时帧注入 / 审批应答 / 跨机对话），
+> 但仅在单一环境（Windows 本机 + 腾讯云 Linux，SSH 隧道）验证过，配置格式与安全边界仍可能变化。
 
-全部通过 DSH 自有的 `/api` 协议原生完成——不依赖 SSH、不做屏幕抓取、不改远端任何配置、不在远端装任何插件。
+## 这是什么
 
-**适合谁**：有多台 DSH 服务器（家里的、公司的、云上的）且希望在一个界面里统管的人；不想要桌面壳/手机端/多开浏览器的人。
+你有好几台跑着 `dsh web` 的机器 —— 家里的、公司的、云上的。想看某台上的会话，就得开一个新标签页、连一次隧道、再从头找。
 
-## Compatibility
+这个插件让它们**出现在同一棵树里**：
 
-| 项 | 说明 |
-|---|---|
-| 宿主 DSH | 实测 `@deepseek-ai/dsh@0.1.0-rc.6`（npm 发行版）✅ |
-| 主仓库 mainline | 未逐 commit 跟踪；接口演进期请以发行版为准 |
-| Node | `^22.19 \|\| >=24`（`engines`；依赖内置 `WebSocket`/`fetch`） |
-| 远端 DSH | 任何能应答标准 `/api` 的 `dsh web`（含 0.1.0-rc.x 实测） |
-| 浏览器 | 官方 Web UI（无版本约束，插件零替换 UI） |
-| **最后验证** | **2026-08-14**：本地 Windows + Node v24.9.0 ↔ 远端 Linux(OpenCloudOS 9.4) + Node v24.9.0，SSH 隧道跨机对话/审批/实时流全链路通过 |
+<!-- 截图占位：侧边栏（服务器分组 + 会话）。补图后替换本行 -->
 
-> ⚠️ Alpha 兼容性承诺：配置格式、路由表、`/hub/events` 帧协议在 1.0 前可能破坏性变更。
+```text
+工作区
+├── my-project        ← 本机工作区（官方原样）
+├── another-repo      ← 本机工作区
+├── tencent           ← 远端服务器，点开就是那台机器的会话
+│   ├── 部署脚本调试
+│   └── 日志分析
+└── codex             ← 导入的 Codex CLI 历史对话
+    └── 重构方案讨论
+```
 
-## Install / Uninstall
+点开任意一个会话 —— 包括远端的 —— 官方对话区照常渲染：历史、逐 token 流式输出、审批卡片、提问问卷，全是官方组件。插件只搬数据，不画界面。
 
-### 安装（推荐：版本化 tarball）
+### 核心能力
+
+- **🌲 远端会话进官方树**
+  每台服务器成为工作区树里的一个分组。树内操作全是原生语义：**+ 新建会话** 在那台机器上创建、**归档/删除** 路由到会话所在机器、**重命名分组** = 重命名服务器、**删除分组** = 断开该连接。
+
+- **💬 官方对话区零替换**
+  远端会话的历史、实时流、审批与提问卡片全部由官方组件渲染。没有自绘聊天窗，没有 shadow slot。
+
+- **📥 导入其他工具的会话**
+  把本机 Codex CLI / Claude Code / opencode 的历史对话读进树里，按项目目录自动归入对应工作区。**按软件逐个手动开启**，未点「导入」的软件日志不会被读取。导入的会话只读；直接向它发消息会自动转成真实 DSH 会话。
+
+- **🔑 模型配置增量同步**
+  服务器连上后，把本机有而远端缺的模型提供方、默认模型与 API Key 补过去。只补缺、不覆盖远端已有配置。
+
+- **🔌 纯 `/api` 协议实现**
+  不依赖 SSH 执行命令、不做屏幕抓取、不改远端任何配置、**不在远端装任何插件**。远端就是一个未经修改的 `dsh web`。
+
+**适合谁**：有多台 DSH 机器想统一管理的人；不想为此再开一个桌面壳或手机端的人；本机堆了一堆 Codex/Claude Code 历史对话想翻出来接着聊的人。
+
+**不适合谁**：只有一台机器且不用外部工具的人 —— 这插件对你没有价值。
+
+## 安装
 
 ```bash
 dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
 ```
 
-`dsh plugin` 把参数原样转发给 profile 目录里的 pnpm（本机需要 pnpm）。随后**重启 `dsh web`**（`kill -TERM <pid>` 并等待退出，勿用 `kill -9`：会在写入中途撕裂会话 zstd 日志），刷新页面。浏览器 **设置 → 插件** 中出现 **会话枢纽 / Session Hub** 标签页即安装成功。
+装完**重启 `dsh web`**（`kill -TERM <pid>` 并等待退出，别用 `kill -9` —— 会在写入中途撕裂会话 zstd 日志），刷新页面。
+**设置 → 插件** 里出现 **会话枢纽** 标签页即成功。
 
-仓库已提交构建产物（`lib/`），因此 tarball 安装无需在本机构建 —— pnpm 对 tarball 依赖不执行 `prepare`。
+`dsh plugin` 把参数原样转发给 profile 目录里的 pnpm（本机需要 pnpm）。仓库已提交构建产物，tarball 安装无需本地构建。
 
-### 安装（本地源码 / 开发）
+<details>
+<summary><b>从源码安装（改代码调试）</b></summary>
 
 ```bash
-git clone https://github.com/Asaiuta/dsh-session-hub
-dsh plugin --profile web add file:/path/to/dsh-session-hub
-# 或手动挂载 bundle：把 cordis.patch.yml 的 insert 条目并入 profile 的 patch 层
+git clone https://github.com/Asaiuta/dsh-session-hub && cd dsh-session-hub
+npm install && npm run build
+dsh plugin --profile web add file:$(pwd)
 ```
 
-### 升级
+或手动挂载：把 `cordis.patch.yml` 的 insert 条目并入 profile 的 patch 层。
+
+</details>
+
+<details>
+<summary><b>升级 / 禁用 / 彻底移除</b></summary>
+
+**升级** —— 换成新版本的 tarball URL 重跑 add，重启 `dsh web`：
 
 ```bash
-# 换成新版本的 tarball URL 重跑 add；或源码方式重跑 add file:...
 dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v<新版本>.tar.gz
-# 重启 dsh web 生效
 ```
 
-### 禁用（临时）
+**临时禁用**：从 profile 的 bundle 列表 / `cordis.patch.yml` 移除 `dsh-session-hub` 条目后重启。
+服务器注册表**保留**，重新启用即恢复。
 
-从 profile 的 bundle 列表 / `cordis.patch.yml` patch 层移除 `dsh-session-hub` 条目后重启。服务器注册表文件**保留**，重新启用即恢复。
+**彻底移除**：移除条目并重启后，删掉这两个文件即可（都在 `$DSH_HOME/plugins/`）：
+`dsh-session-hub.json`（服务器注册表）、`dsh-session-hub-imports.json`（导入解析缓存）。
+插件从不写入你的项目目录，也不改动任何工具的原始日志。
 
-### 彻底移除
+</details>
 
-1. 按上面移除 bundle/patch 条目并重启；
-2. 删除注册表：`$DSH_HOME/plugins/dsh-session-hub.json`（默认路径，见 Configuration）。
+## 环境要求
 
-## Quick start
+| 项 | 要求 |
+|---|---|
+| 本机 DSH | 实测 `@deepseek-ai/dsh@0.1.0-rc.6`；mainline 未逐 commit 跟踪 |
+| Node | `^22.19 \|\| >=24`（用到内置 `WebSocket` / `fetch`） |
+| 远端 DSH | 任何能应答标准 `/api` 的 `dsh web` —— **远端无需安装本插件** |
+| 浏览器 | 官方 Web UI，无版本约束（插件不替换任何 UI） |
 
-**最小可复现示例：一台远端 + 本机 hub + SSH 隧道**
+**最后验证 2026-08-14**：本机 Windows + Node v24.9.0 ↔ 远端 OpenCloudOS 9.4 + Node v24.9.0，
+经 SSH 隧道跑通跨机对话、审批应答与实时流全链路。
+
+> Alpha 期间：配置格式、路由表、`/hub/events` 帧协议在 1.0 前可能破坏性变更。
+
+## 快速开始
+
+**最小可复现示例：一台远端 + 本机 hub + SSH 隧道。**
+
+**① 远端**（假设 `10.0.0.5`）—— 什么都不用装，保持默认即可：
 
 ```bash
-# ── 远端（10.0.0.5）──
-# 保持默认环回监听最安全（配合隧道）；也可 --host 0.0.0.0 直连局域网
-dsh web --port 3080
-
-# ── 本机 ──
-dsh web                                  # 默认 http://127.0.0.1:3080
-dsh plugin --profile web add dsh-session-hub
-# 重启 dsh web 后，建立隧道：
-ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
-
-# ── 浏览器 http://127.0.0.1:3080 ──
-# 1. 设置 → 插件 → Session Hub → 「添加服务器」→ 名称: tencent, baseUrl: http://127.0.0.1:3333
-#    点「测试」（返回远端 DSH 版本即通）→ 添加
-# 2. 官方工作区树出现该服务器的分组（名为服务器名，会话在组内；本地组并列）
-# 3. 点击会话：官方对话区打开——历史加载、实时逐 token 流、审批/提问卡片、发送/取消/重命名
+dsh web --port 3080          # 默认只监听环回，配合隧道最安全
 ```
+
+**② 本机** —— 装插件、建隧道：
+
+```bash
+dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/refs/tags/v0.1.0-alpha.1.tar.gz
+# 重启 dsh web，然后：
+ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
+```
+
+**③ 浏览器** `http://127.0.0.1:3080`：
+
+1. **设置 → 插件 → 会话枢纽 → 添加服务器**，填名称 `tencent`、地址 `http://127.0.0.1:3333`，点**测试**（返回远端 DSH 版本即通）→ **添加**；
+2. 官方工作区树里出现名为 `tencent` 的分组，远端会话就在组内；
+3. 点开任一会话 —— 官方对话区照常工作：历史、实时流、审批卡片、发送 / 取消 / 重命名。
+
+<!-- 截图占位：设置 → 插件 → 会话枢纽。补图后替换本行 -->
+
+> **不用隧道也行**：远端 `dsh web --host 0.0.0.0`（CLI 会自动把本机 LAN IP 加进白名单），本地填 `http://10.0.0.5:3080`。
+> **但不要把 3080 暴露到公网** —— DSH 的信任围栏是防 DNS 重绑定的，不是认证。
 
 ### 导入本机其他工具的会话（可选）
 
-设置 → 插件 → Session Hub → **外部会话**，按软件点「导入」：
+**设置 → 插件 → 会话枢纽 → 外部会话**，按软件点「导入」：
 
 | 软件 | 读取位置 |
 |---|---|
@@ -100,13 +155,12 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | opencode | `~/.local/share/opencode/opencode.db` |
 
-未点「导入」的软件其日志完全不会被读取。导入后勾选「自动」可每 60 秒增量跟进新产生的会话，取消勾选则只在你手动点刷新时更新。「移除」把该软件的会话撤出目录树，不影响其他软件，也不动原始日志。
+- **未点「导入」的软件，日志一个字节都不会被读**；
+- 勾选**自动**：每 60 秒增量跟进该软件新产生的会话；不勾选就只在你点刷新时更新；
+- **移除**：把该软件的会话撤出树，不影响其他软件，也不动原始日志；
+- 导入的会话在树里**只读**；直接向它发消息会自动转成真实 DSH 会话（保留用户/助手对话，原只读副本隐藏）。
 
-导入的会话在树中只读；直接向它发消息会自动转成真实 DSH 会话（保留用户/助手对话，原只读副本隐藏）。
-
-直连局域网替代隧道：远端 `dsh web --host 0.0.0.0`（CLI 自动推导 LAN IP 白名单），本地添加 `http://10.0.0.5:3080`。**不要把 3080 暴露到公网**（信任围栏不是认证）。
-
-## Configuration
+## 配置
 
 | 配置项 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -122,13 +176,15 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
     trustedHosts: ['192.168.1.10:3080']
 ```
 
-**环境变量**：
-- `DSH_HOME`：影响注册表默认路径（默认 `~/.dsh`）；
-- 无需任何 API key / 令牌环境变量。
+唯一相关的环境变量是 `DSH_HOME`（影响注册表默认路径，默认 `~/.dsh`）—— 插件不需要任何 API key 或令牌环境变量。
+运行期 `/hub/events` 用的随机 token 每进程生成一次，只经快照下发给浏览器，不落盘。
 
-**敏感项**：无持久化密钥。运行期 `/hub/events` 的随机 token 每进程生成一次，仅经快照下发到浏览器，不落盘。
+## 它访问什么
 
-## Permissions & data
+一句话：**读你本机的会话日志（需你逐个授权）、和你配置的服务器通信、不碰你的项目文件**。
+
+<details>
+<summary><b>完整清单（文件 / 网络 / 凭据 / 会话内容）</b></summary>
 
 **文件访问**：
 - 读/写 `$DSH_HOME/plugins/dsh-session-hub.json`（`0600`，原子写：tmp + rename）；
@@ -144,12 +200,14 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 
 **用户数据**：远端会话列表、历史内容、实时流会经由 hub 进程与浏览器中转显示——跨机传输建议走 SSH 隧道（加密）；我方不明文落盘任何会话内容。
 
-## Troubleshooting
+</details>
+
+## 常见问题
 
 | 症状 | 原因 / 处理 |
 |---|---|
 | 添加服务器报 `self-loop` | baseUrl 指向 hub 自身。插件启动时也会自动检测并跳过自环条目（日志 warn） |
-| 历史加载失败 `signal timed out` | 最常见：SSH 隧道断了。检查 `netstat -ano 竖 grep :3333`；重启隧道后远端自动重连 |
+| 历史加载失败 `signal timed out` | 最常见：SSH 隧道断了。检查 `netstat -ano \| grep :3333`；重启隧道后远端自动重连 |
 | 历史加载失败 `invalid_value … expected "server-response"` | 旧版本网关直通缺陷，**升级到 0.1.0-alpha.1+**（已修复：出口统一补 `type: 'server-response'`） |
 | 会话列表少了一项 | 冷启动后远端首个 `session.list` 拉取未完成；打开会话本身会触发重拉 |
 | 实时流断开（LIVE 徽标变灰） | SSE 自动重连；发送后 900ms 无实时事件自动回退历史重载 |
@@ -157,9 +215,9 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 
 **日志位置**：`dsh web` 进程 stdout/stderr——systemd 部署 `journalctl -u dsh-web`，nohup 部署看输出文件；本地终端部署看控制台。
 
-**回滚**：npm 方式降级 `dsh plugin … add dsh-session-hub@<上一版本>`；源码方式 `git checkout <上一 commit>` 后重建重启。注册表文件向后兼容（未知字段忽略）。
+**回滚**：重跑 `dsh plugin --profile web add <上一个 tag 的 tarball URL>` 并重启即可。注册表文件向后兼容（未知字段忽略），降级不会丢配置。
 
-## Development
+## 开发
 
 ```bash
 git clone https://github.com/Asaiuta/dsh-session-hub && cd dsh-session-hub
@@ -172,15 +230,15 @@ npm run build        # esbuild → lib/index.js + lib/client.js + lib/types/
 - `@deepseek-ai/dsh-*` 未发布到 npm，运行时由 profile 提供（peerDeps 因此全部 optional）。
 - **测试**：当前无自动化套件；冒烟路径（网关合并去重、SSE 三重鉴权、跨机实时对话、审批应答、self-loop 拒绝）为实机手动验证。欢迎贡献测试与 PR。
 
-## License & security
+## 许可证与安全
 
 - License：**[MIT](./LICENSE)**。
-- 安全边界：见上方 Permissions & data；设计不变量——不中继特权域、审批一律人工应答（插件不做自动放行）、自环/未授权源一律拒绝。
+- 安全边界见上方「它访问什么」；设计不变量——不中继特权域、审批一律人工应答（插件不做自动放行）、自环/未授权源一律拒绝。
 - **私密报告**：请通过 [GitHub Issues](https://github.com/Asaiuta/dsh-session-hub/issues) 提交（标注 `[security]`），或直接联系维护者 [@Asaiuta](https://github.com/Asaiuta)；修复前不会公开细节。
 
 ---
 
-## 架构（补充）
+## 架构
 
 ```
 ┌──────────────────────── 本地 DSH 进程 ────────────────────────┐
