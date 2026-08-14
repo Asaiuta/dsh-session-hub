@@ -1,4 +1,4 @@
-export type ImportTool = 'codex' | 'claude' | 'opencode';
+export type ImportTool = 'codex' | 'claude' | 'opencode' | 'pi';
 export interface ImportedTurn {
     role: 'user' | 'assistant';
     text: string;

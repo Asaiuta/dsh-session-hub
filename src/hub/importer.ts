@@ -18,6 +18,7 @@ import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy'
 import { parseCodexRollout } from './import-codex.ts'
 import { parseClaudeProject } from './import-claude.ts'
 import { scanOpencode } from './import-opencode.ts'
+import { parsePiSession } from './import-pi.ts'
 import { cleanTurnText, normalizePath, type ImportedSession, type ImportedTurn } from './import-common.ts'
 import { ACTIVE_WINDOW_MS, ImportWatcher } from './import-watch.ts'
 
@@ -57,9 +58,9 @@ export function groupingPath(cwd: string): { normalized: string; display: string
   return { normalized, display: cwd }
 }
 
-export type ImportSource = 'codex' | 'claude' | 'opencode'
+export type ImportSource = 'codex' | 'claude' | 'opencode' | 'pi'
 
-export const IMPORT_SOURCES: readonly ImportSource[] = ['codex', 'claude', 'opencode']
+export const IMPORT_SOURCES: readonly ImportSource[] = ['codex', 'claude', 'opencode', 'pi']
 
 /** What the settings tab shows and acts on, per source tool. */
 export interface ImportSourceStatus {
@@ -83,6 +84,7 @@ export function sourcePath(source: ImportSource): string {
   const home = homedir()
   if (source === 'codex') return join(home, '.codex', 'sessions')
   if (source === 'claude') return join(home, '.claude', 'projects')
+  if (source === 'pi') return join(home, '.pi', 'agent', 'sessions')
   return join(home, '.local', 'share', 'opencode', 'opencode.db')
 }
 
@@ -473,6 +475,11 @@ export class ImportStore {
       const claudeRoot = sourcePath('claude')
       for (const file of await walkFiles(claudeRoot, '.jsonl')) jsonlRoots.add(file)
       await scanJsonl(claudeRoot, '.jsonl', parseClaudeProject, this.cache)
+    }
+    if (enabled.includes('pi')) {
+      const piRoot = sourcePath('pi')
+      for (const file of await walkFiles(piRoot, '.jsonl')) jsonlRoots.add(file)
+      await scanJsonl(piRoot, '.jsonl', parsePiSession, this.cache)
     }
     if (enabled.includes('opencode')) {
       const opencodeDb = sourcePath('opencode')

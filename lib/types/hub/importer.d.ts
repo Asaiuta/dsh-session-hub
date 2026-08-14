@@ -18,7 +18,7 @@ export declare function groupingPath(cwd: string): {
     display: string;
     nameHint?: string;
 };
-export type ImportSource = 'codex' | 'claude' | 'opencode';
+export type ImportSource = 'codex' | 'claude' | 'opencode' | 'pi';
 export declare const IMPORT_SOURCES: readonly ImportSource[];
 /** What the settings tab shows and acts on, per source tool. */
 export interface ImportSourceStatus {
