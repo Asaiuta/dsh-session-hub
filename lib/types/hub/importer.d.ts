@@ -138,6 +138,19 @@ export declare class ImportStore {
      */
     private emitGrowth;
     /**
+     * The seq the next live event of this session must carry.
+     *
+     * Pinned on first use to the length of the session's history as
+     * {@link buildHistory} numbers it, then advanced only by live pushes — so
+     * it stays contiguous with what the client loaded even as the underlying
+     * turn list is capped and renumbers itself.
+     *
+     * @param id - hub session id.
+     * @param session - the session's current parsed form.
+     * @returns the seq to assign to the next emitted event.
+     */
+    private seqBase;
+    /**
      * Subscribe to turns appearing in already-known sessions.
      * @param listener - receives the session id and one official history event.
      */

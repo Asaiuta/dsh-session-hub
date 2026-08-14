@@ -603,16 +603,25 @@ export class ImportStore {
         : next.turns.filter(t => t.time > lastBefore.time)
       if (fresh.length === 0) continue
 
-      // The client drops any event whose seq it has already passed, so the
-      // numbering has to rise forever. buildHistory renumbers from zero over
-      // the *current* turn list, which shrinks back every time a capped
-      // session drops its oldest turn — emitting those numbers directly made
-      // seq go backwards (455 then 452) and the client discarded the frames.
-      // Keep a per-session high-water mark and count up from it instead.
-      const base = Math.max(
-        this.liveSeq.get(id) ?? 0,
-        buildHistory(next).length,
-      )
+      // Two constraints pull in opposite directions here.
+      //
+      // The client drops an event at or below the seq it already holds, and
+      // it *buffers* (does not render) an event more than one past it,
+      // treating the gap as a reconnect artifact to repair. So live seq must
+      // be strictly tailSeq + 1 — contiguous, not merely increasing.
+      //
+      // buildHistory renumbers from zero over the current turn list, which
+      // stops growing once a session is capped: each new turn drops the
+      // oldest. Emitting those numbers directly made seq go backwards. But a
+      // free-running high-water mark drifts ahead of the history page the
+      // client actually loaded, so every frame landed in the gap buffer and
+      // the transcript froze after the first one.
+      //
+      // The fix is to stop inventing numbers: pin the session's seq base at
+      // the length of the history the client was served, and count the new
+      // tail up from exactly there. `history()` reads the same base, so the
+      // two can never disagree.
+      const base = this.seqBase(id, next)
       let seq = base
       for (const entry of buildHistory({ ...next, turns: fresh })) {
         const event = entry.event as { seq?: number, [key: string]: unknown }
@@ -621,6 +630,26 @@ export class ImportStore {
       }
       this.liveSeq.set(id, seq)
     }
+  }
+
+  /**
+   * The seq the next live event of this session must carry.
+   *
+   * Pinned on first use to the length of the session's history as
+   * {@link buildHistory} numbers it, then advanced only by live pushes — so
+   * it stays contiguous with what the client loaded even as the underlying
+   * turn list is capped and renumbers itself.
+   *
+   * @param id - hub session id.
+   * @param session - the session's current parsed form.
+   * @returns the seq to assign to the next emitted event.
+   */
+  private seqBase(id: string, session: ImportedSession): number {
+    const pinned = this.liveSeq.get(id)
+    if (pinned !== undefined) return pinned
+    const base = buildHistory(session).length
+    this.liveSeq.set(id, base)
+    return base
   }
 
   /**
@@ -826,6 +855,12 @@ export class ImportStore {
   history(sessionId: string): HistoryEvent[] | undefined {
     const session = this.sessions.get(sessionId)
     if (session === undefined || !this.projectExists(session.cwd)) return undefined
-    return buildHistory(session)
+    const events = buildHistory(session)
+    // Re-pin the live base to this page's tail. The client stitches live
+    // events onto exactly what this call returned, so any later push has to
+    // continue this numbering — not a base pinned before the session grew,
+    // and not a fresh renumbering of a turn list that has since been capped.
+    this.liveSeq.set(sessionId, events.length)
+    return events
   }
 }
