@@ -19,6 +19,42 @@ import { parseClaudeProject } from './import-claude.ts'
 import { scanOpencode } from './import-opencode.ts'
 import { normalizePath, type ImportedSession } from './import-common.ts'
 
+/**
+ * Per-conversation scratch directories Codex creates under the user's home:
+ * `Documents/Codex/<date>/<chat-slug>` for chats started outside a project,
+ * and `.codex/worktrees/<hash>/<project>` for throwaway git worktrees. Left
+ * alone, each conversation becomes its own "project" group and floods the
+ * tree with dozens of single-session directories.
+ */
+const CODEX_CHAT_SCRATCH = /^(.*)\/documents\/codex\/\d{4}-\d{2}-\d{2}\/[^/]+$/
+const CODEX_WORKTREE = /^.*\/\.codex\/worktrees\/[^/]+\/(.+)$/
+
+/**
+ * The path an imported session groups under.
+ *
+ * Codex scratch directories are folded so they do not explode into one group
+ * per conversation: chat scratch dirs collapse to a single shared bucket, and
+ * a worktree copy reports the project name it mirrors so it can be matched to
+ * that project's workspace by name rather than by its hashed path.
+ *
+ * @param cwd - the session's recorded working directory.
+ * @returns the grouping key, the path to display, and an optional project
+ *   name to match against workspace basenames.
+ */
+function groupingPath(cwd: string): { normalized: string; display: string; nameHint?: string } {
+  const normalized = normalizePath(cwd)
+  const chat = CODEX_CHAT_SCRATCH.exec(normalized)
+  if (chat !== null) {
+    const root = `${chat[1]}/documents/codex`
+    return { normalized: root, display: root }
+  }
+  const worktree = CODEX_WORKTREE.exec(normalized)
+  if (worktree !== null) {
+    return { normalized, display: cwd, nameHint: worktree[1] }
+  }
+  return { normalized, display: cwd }
+}
+
 export type ImportSource = 'codex' | 'claude' | 'opencode'
 
 interface CacheFile {
@@ -305,12 +341,52 @@ export class ImportStore {
     return this.visible().map(toSummary)
   }
 
-  /** Imported session ids whose cwd matches the given workspace path. */
-  idsForWorkspace(workspacePath: string): string[] {
-    const norm = normalizePath(workspacePath)
-    return this.visible()
-      .filter(s => normalizePath(s.cwd) === norm)
-      .map(s => s.sessionId)
+  /**
+   * Assign every imported session to a workspace, given the official
+   * workspace paths.
+   *
+   * A session belongs to the *longest* workspace path that contains its cwd,
+   * so a session run in `D:/AI/proj/tools` lands in the `D:/AI/proj`
+   * workspace rather than a broader `D:/AI` one. Sessions whose project has
+   * no workspace at all are grouped by their own cwd, which the gateway then
+   * surfaces as a synthetic project group — otherwise they would all collapse
+   * into the ungrouped bucket.
+   *
+   * @param workspacePaths - official workspace paths (any separator style).
+   * @returns ids per matched workspace path, plus leftovers keyed by cwd.
+   */
+  assign(workspacePaths: readonly string[]): {
+    byWorkspace: Map<string, string[]>
+    orphansByCwd: Map<string, { path: string; ids: string[] }>
+  } {
+    // Longest first: the first containing path wins, which is the most
+    // specific one.
+    const roots = [...new Set(workspacePaths.map(normalizePath))]
+      .filter(p => p !== '' && !p.startsWith('dsh-hub://'))
+      .sort((a, b) => b.length - a.length)
+    const byBasename = new Map<string, string>()
+    for (const root of roots) {
+      const base = root.slice(root.lastIndexOf('/') + 1)
+      if (base !== '' && !byBasename.has(base)) byBasename.set(base, root)
+    }
+    const byWorkspace = new Map<string, string[]>()
+    const orphansByCwd = new Map<string, { path: string; ids: string[] }>()
+    for (const session of this.visible()) {
+      const cwd = groupingPath(session.cwd)
+      const root = roots.find(r => cwd.normalized === r || cwd.normalized.startsWith(`${r}/`))
+        ?? (cwd.nameHint === undefined ? undefined : byBasename.get(cwd.nameHint))
+      if (root !== undefined) {
+        const ids = byWorkspace.get(root)
+        if (ids === undefined) byWorkspace.set(root, [session.sessionId])
+        else ids.push(session.sessionId)
+        continue
+      }
+      if (cwd.normalized === '') continue
+      const group = orphansByCwd.get(cwd.normalized)
+      if (group === undefined) orphansByCwd.set(cwd.normalized, { path: cwd.display, ids: [session.sessionId] })
+      else group.ids.push(session.sessionId)
+    }
+    return { byWorkspace, orphansByCwd }
   }
 
   /** Generated HistoryEntries (read-only view). */

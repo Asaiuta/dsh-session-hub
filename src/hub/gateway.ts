@@ -15,9 +15,41 @@ import type {
 } from '@deepseek-ai/dsh-host-apiproxy'
 import type { ServerRegistry } from './registry.ts'
 import type { ImportStore } from './importer.ts'
+import type { WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
+import { createHash } from 'node:crypto'
+import { normalizePath } from './import-common.ts'
 import { isTrustedApiRequest } from './fence.ts'
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024
+
+/**
+ * Synthetic workspace groups for imported sessions whose project directory
+ * has no official workspace. Without these every such session collapses into
+ * the ungrouped bucket; with them the tree shows one group per project,
+ * titled after the directory. The id is derived from the path so the group
+ * keeps its identity across refreshes (the official tree keys rows by id).
+ *
+ * @param orphans - leftover sessions keyed by normalized cwd.
+ * @returns one WorkspaceView per project directory.
+ */
+function importedProjectViews(
+  orphans: Map<string, { path: string; ids: string[] }> | undefined,
+): WorkspaceView[] {
+  if (orphans === undefined) return []
+  const epoch = new Date(0).toISOString()
+  return [...orphans].map(([normalized, group]) => {
+    const digest = createHash('sha256').update(`import-project:${normalized}`).digest('hex').slice(0, 24)
+    const segments = group.path.split(/[\\/]/).filter(Boolean)
+    return {
+      workspaceId: `imp-ws-${digest}`,
+      path: group.path,
+      title: segments[segments.length - 1] ?? group.path,
+      sessionIds: group.ids,
+      createdAt: epoch,
+      updatedAt: epoch,
+    } as WorkspaceView
+  })
+}
 
 /** Methods whose session may live on a remote server (unary, envelope-carried). */
 const ROUTED_SESSION_METHODS = new Set([
@@ -208,12 +240,20 @@ export class HubGateway {
       : []
     const remoteArchived = this.registry.linkList().flatMap(link => link.archivedSessionIds())
     const archivedSessionIds = [...new Set([...localArchived, ...remoteArchived])]
+    // One assignment pass over all official paths: each imported session goes
+    // to its longest containing workspace, and whatever is left over is
+    // grouped by project directory below.
+    const officialPaths = value.items.flatMap(item => {
+      const path = typeof item === 'object' && item !== null ? (item as { path?: unknown }).path : undefined
+      return typeof path === 'string' ? [path] : []
+    })
+    const assignment = this.imports?.assign(officialPaths)
     const items = value.items.map(item => {
-      if (this.imports === undefined) return item
+      if (assignment === undefined) return item
       const path = typeof item === 'object' && item !== null ? (item as { path?: unknown }).path : undefined
       if (typeof path !== 'string') return item
-      const imported = this.imports.idsForWorkspace(path)
-      if (imported.length === 0) return item
+      const imported = assignment.byWorkspace.get(normalizePath(path))
+      if (imported === undefined || imported.length === 0) return item
       const sessionIds = Array.isArray((item as { sessionIds?: unknown }).sessionIds)
         ? (item as { sessionIds: unknown[] }).sessionIds
         : []
@@ -226,7 +266,11 @@ export class HubGateway {
         ok: true,
         value: {
           ...value,
-          items: [...items, ...this.virtualWorkspaceViews()],
+          items: [
+            ...items,
+            ...this.virtualWorkspaceViews(),
+            ...importedProjectViews(assignment?.orphansByCwd),
+          ],
           archivedSessionIds,
         },
       },
