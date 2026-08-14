@@ -83,6 +83,34 @@ export function apply(ctx: Context, config?: Config): void {
     registry,
     resolved.trustedHosts ?? [],
   )
+
+  // Virtual-workspace live projection: the official client pulls workspace.list
+  // only once per connection, so remote session drift (added/removed servers,
+  // session create/delete/title) must reach the tree as synthetic host frames
+  // over the same SSE bus the bridge consumes. A 1.5s diff watcher publishes
+  // host/workspace-changed (full view) and host/workspace-removed deltas.
+  ctx.effect(() => {
+    let last = new Map<string, string>()
+    const timer = setInterval(() => {
+      const views = gateway.virtualWorkspaceViews()
+      const current = new Map(views.map(view => [view.workspaceId, view.sessionIds.join('\u0001')]))
+      for (const view of views) {
+        if (last.get(view.workspaceId) !== current.get(view.workspaceId)) {
+          registry.events.publish(view.workspaceId as never, 'hub:workspace', {
+            type: 'host/workspace-changed',
+            workspace: view,
+          })
+        }
+      }
+      for (const id of last.keys()) {
+        if (!current.has(id)) {
+          registry.events.publish(id as never, 'hub:workspace', { type: 'host/workspace-removed', workspaceId: id })
+        }
+      }
+      last = current
+    }, 1500)
+    return () => clearInterval(timer)
+  }, 'dsh-session-hub: virtual workspace frame watcher')
     ctx.effect(() => {
       const disposers: (() => void)[] = []
       for (const method of GATEWAY_METHODS) {

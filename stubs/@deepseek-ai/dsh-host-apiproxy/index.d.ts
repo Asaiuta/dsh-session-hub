@@ -152,6 +152,26 @@ export type HostFrame =
   | { type: 'workspace-changed' }
   | { type: 'workspace-removed'; workspaceId: string }
   | { type: 'host/remote-event'; event: string; args: unknown[] }
+  // Virtual-workspace projection (hub-synthesized): servers appear as
+  // workspace groups in the official tree.
+  | { type: 'host/workspace-changed'; workspace: WorkspaceView }
+  | { type: 'host/workspace-removed'; workspaceId: string }
+  | { type: 'host/workspace-order-changed'; workspaceIds: string[] }
+
+/** One workspace row (wire projection; the hub synthesizes views for servers). */
+export interface WorkspaceView {
+  workspaceId: string
+  /** Canonical directory path (virtual views carry a dsh-hub:// origin). */
+  path: string
+  /** Display title (defaults to the path basename at create). */
+  title: string
+  /** Sessions accounted under this workspace, in owned order. */
+  sessionIds: string[]
+  /** ISO-8601 creation instant. */
+  createdAt: string
+  /** ISO-8601 last-mutation instant. */
+  updatedAt: string
+}
 
 // ---- sessions / host / events api (IApiClient surface: payload-direct) ----
 

@@ -22,14 +22,48 @@ export interface OfficialSessions {
   }): void
 }
 
+/** The official workspaces runtime face (host-frame sink). */
+export interface OfficialWorkspaces {
+  handleHostEnvelope(envelope: {
+    type: 'server-request'
+    rpcId: string
+    method: string
+    payload: unknown
+  }): void
+}
+
 /**
- * Start relaying hub SSE frames into the official sessions runtime.
+ * Start relaying hub SSE frames into the official runtimes: mux frames into
+ * the sessions runtime, and the hub-synthesized `host/workspace-*` frames
+ * (virtual server groups) into the workspaces runtime.
  * @param sessions - the official `ctx.sessions` service instance.
+ * @param workspaces - the official `ctx.workspaces` service instance.
  * @returns the disposer (stop relaying).
  */
-export function startOfficialBridge(sessions: OfficialSessions | undefined): () => void {
+export function startOfficialBridge(
+  sessions: OfficialSessions | undefined,
+  workspaces: OfficialWorkspaces | undefined,
+): () => void {
   if (sessions === undefined) return () => {}
   return subscribeFrames(({ rpcId, frame }) => {
+    const type = typeof frame === 'object' && frame !== null
+      ? (frame as { type?: unknown }).type
+      : undefined
+    if (typeof type === 'string' && type.startsWith('host/workspace-')) {
+      if (workspaces !== undefined) {
+        try {
+          workspaces.handleHostEnvelope({
+            type: 'server-request',
+            rpcId,
+            method: 'events.host',
+            payload: frame,
+          })
+        } catch (error) {
+          console.error('[dsh-session-hub] official workspaces frame rejected:', error)
+        }
+      }
+      return
+    }
     try {
       sessions.handleMuxEnvelope({
         type: 'server-request',
@@ -41,6 +75,16 @@ export function startOfficialBridge(sessions: OfficialSessions | undefined): () 
       console.error('[dsh-session-hub] official sessions frame rejected:', error)
     }
   })
+}
+
+/** Reflect access helper: read the workspaces service off any context object. */
+export function workspacesOf(context: unknown): OfficialWorkspaces | undefined {
+  const candidate = (context as { workspaces?: unknown }).workspaces
+  if (candidate !== undefined
+    && typeof (candidate as { handleHostEnvelope?: unknown }).handleHostEnvelope === 'function') {
+    return candidate as OfficialWorkspaces
+  }
+  return undefined
 }
 
 /** Reflect access helper: read the sessions service off any context object. */

@@ -36,8 +36,12 @@ export const GATEWAY_METHODS = [
   'session.list',
   ...ROUTED_SESSION_METHODS,
   'session.search',
+  'workspace.list',
   'respond',
 ]
+
+/** Virtual-workspace origin marker for server groups in the official tree. */
+const VIRTUAL_WORKSPACE_EPOCH = '1970-01-01T00:00:00.000Z'
 
 /** Read the request body (bounded); null on oversize or missing body. */
 function readBody(req: IncomingMessage): Promise<Buffer | null> {
@@ -125,6 +129,7 @@ export class HubGateway {
       if (method === 'session.list') return this.list(rpcId, payload)
       if (ROUTED_SESSION_METHODS.has(method)) return this.bySession(method, rpcId, payload)
       if (method === 'session.search') return this.search(rpcId, payload)
+      if (method === 'workspace.list') return this.workspaceList(rpcId, payload)
       if (method === 'respond') return this.respond(rpcId, payload)
       return this.callOfficial(method, rpcId, payload)
     } catch (error) {
@@ -166,6 +171,52 @@ export class HubGateway {
       return Number(tb) - Number(ta)
     })
     return { type: 'server-response', rpcId, result: { ok: true, value: { items } } }
+  }
+
+  /**
+   * Merged workspace list: official local workspaces + one *virtual* group
+   * per configured server. The official tree groups sessions by workspace
+   * membership, so each server's remote sessions appear as their own
+   * top-level group instead of the ungrouped bucket. Virtual views carry a
+   * `dsh-hub://<serverId>` path and the server's display name as title.
+   */
+  private async workspaceList(rpcId: RpcId, payload: unknown): Promise<RpcResponse<unknown>> {
+    const local = await this.callOfficial('workspace.list', rpcId, payload)
+    if (!local.result.ok || !Array.isArray((local.result.value as { items?: unknown }).items)) {
+      return local
+    }
+    const value = local.result.value as { items: unknown[]; archivedSessionIds: unknown }
+    return {
+      type: 'server-response',
+      rpcId,
+      result: {
+        ok: true,
+        value: {
+          ...value,
+          items: [...value.items, ...this.virtualWorkspaceViews()],
+        },
+      },
+    }
+  }
+
+  /**
+   * The virtual workspace projection: one workspace row per configured
+   * server, owning that server's remote sessions. Shared by the workspace.list
+   * merge and the synthetic `host/workspace-changed` frame watcher, so the
+   * official tree stays consistent between cold list and live updates.
+   */
+  virtualWorkspaceViews(): import('@deepseek-ai/dsh-host-apiproxy').WorkspaceView[] {
+    const snapshot = this.registry.snapshot()
+    return snapshot.servers.map(server => ({
+      workspaceId: server.id,
+      path: `dsh-hub://${server.id}`,
+      title: server.name,
+      sessionIds: snapshot.sessions
+        .filter(row => row.serverId === server.id)
+        .map(row => row.sessionId),
+      createdAt: VIRTUAL_WORKSPACE_EPOCH,
+      updatedAt: VIRTUAL_WORKSPACE_EPOCH,
+    }))
   }
 
   /** Search across the local host and every remote server (best effort). */

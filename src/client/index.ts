@@ -16,7 +16,7 @@ import { SESSION_HUB_REMOTE } from './remote.ts'
 import { NS, en, zh, type HubKey } from './locales.ts'
 import { adoptStyles } from './styles.ts'
 import { SessionHubSettingsTab } from './settings-tab.tsx'
-import { sessionsOf, startOfficialBridge } from './bridge.ts'
+import { sessionsOf, startOfficialBridge, workspacesOf } from './bridge.ts'
 import { ensureHubLive, subscribeFrames, subscribeLiveChanges } from './live.ts'
 import type { HubSnapshot } from '../contract.ts'
 
@@ -28,8 +28,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services: slots, the gateway Remote face, locale, and the
- * official sessions runtime (frames are injected into it). */
-export const inject = ['slots', 'remote', 'locale', 'sessions']
+ * official sessions + workspaces runtimes (frames are injected into them). */
+export const inject = ['slots', 'remote', 'locale', 'sessions', 'workspaces']
 
 /** Locale pick for slot labels (module-level by browser language). */
 const zhLocale = typeof navigator !== 'undefined'
@@ -63,11 +63,14 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'dsh-session-hub: remote')
 
-  // Bridge: relay hub SSE frames into the official sessions runtime so the
-  // official UI renders remote sessions natively.
+  // Bridge: relay hub SSE frames into the official runtimes so the official
+  // UI renders remote sessions natively — mux frames into the sessions
+  // runtime, synthesized host/workspace-* frames (virtual server groups)
+  // into the workspaces runtime.
   ctx.effect(() => {
     const sessions = sessionsOf(ctx)
-    const offFrames = startOfficialBridge(sessions)
+    const workspaces = workspacesOf(ctx)
+    const offFrames = startOfficialBridge(sessions, workspaces)
     // Keep the SSE stream alive and token-rotated even with no section open:
     // once any hub server exists, its frames must reach the official UI.
     let timer: ReturnType<typeof setTimeout> | undefined
