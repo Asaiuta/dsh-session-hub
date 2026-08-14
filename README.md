@@ -2,10 +2,10 @@
 
 # dsh-session-hub
 
-**一个界面，管所有机器的 DSH 会话。**
+**你的会话散在各处，这里把它们收进一棵树。**
 
-多台服务器的会话汇进本机官方 Web UI —— 侧边栏零改动、对话区零替换。
-顺手把 Codex CLI / Claude Code / opencode 的历史对话也接进来。
+远端服务器的 DSH 会话、本机 Codex CLI / Claude Code / opencode 的历史对话，
+一起进官方 Web UI —— 侧边栏零改动、对话区零替换。两件事互相独立，可以只装一件。
 
 <a href="https://www.npmjs.com/package/dsh-session-hub"><img alt="npm" src="https://img.shields.io/npm/v/dsh-session-hub/alpha?style=flat-square&color=4b6fff"></a>
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
@@ -21,9 +21,12 @@
 
 ## 这是什么
 
-你有好几台跑着 `dsh web` 的机器 —— 家里的、公司的、云上的。想看某台上的会话，就得开一个新标签页、连一次隧道、再从头找。
+DSH 的会话树只认这一台机器上、这一个工具产生的会话。于是：
 
-这个插件让它们**出现在同一棵树里**：
+- 想看另一台机器上的会话 —— 开新标签页、连隧道、从头找；
+- 上周用 Codex CLI 聊过的方案 —— 在 DSH 里根本不存在，只能去翻 `~/.codex` 下的 JSONL。
+
+这个插件把这两类会话都**接进同一棵树**：
 
 <!-- 截图占位：侧边栏（服务器分组 + 会话）。补图后替换本行 -->
 
@@ -34,32 +37,43 @@
 ├── tencent           ← 远端服务器，点开就是那台机器的会话
 │   ├── 部署脚本调试
 │   └── 日志分析
-└── codex             ← 导入的 Codex CLI 历史对话
-    └── 重构方案讨论
+└── audio-engine      ← 本机工作区，混着导入的历史对话
+    ├── 重构方案讨论        (Codex CLI)
+    └── 修 CI 那次          (Claude Code)
 ```
 
 点开任意一个会话 —— 包括远端的 —— 官方对话区照常渲染：历史、逐 token 流式输出、审批卡片、提问问卷，全是官方组件。插件只搬数据，不画界面。
 
-### 核心能力
+### 两件独立的事
 
-- **🌲 远端会话进官方树**
-  每台服务器成为工作区树里的一个分组。树内操作全是原生语义：**+ 新建会话** 在那台机器上创建、**归档/删除** 路由到会话所在机器、**重命名分组** = 重命名服务器、**删除分组** = 断开该连接。
+插件做两件事。它们不互相依赖，**装了可以只开一件**（见[配置](#配置)）：
 
-- **💬 官方对话区零替换**
-  远端会话的历史、实时流、审批与提问卡片全部由官方组件渲染。没有自绘聊天窗，没有 shadow slot。
+#### 🖧 把远端机器接进来
 
-- **📥 导入其他工具的会话**
-  把本机 Codex CLI / Claude Code / opencode 的历史对话读进树里，按项目目录自动归入对应工作区。**按软件逐个手动开启**，未点「导入」的软件日志不会被读取。导入的会话只读；直接向它发消息会自动转成真实 DSH 会话。
+每台服务器成为工作区树里的一个分组，组内是那台机器的会话。
 
-- **🔑 模型配置增量同步**
-  服务器连上后，把本机有而远端缺的模型提供方、默认模型与 API Key 补过去。只补缺、不覆盖远端已有配置。
+- **树内操作全是原生语义**：**+ 新建会话**在那台机器上创建、**归档/删除**路由到会话所在机器、**重命名分组** = 重命名服务器、**删除分组** = 断开该连接。
+- **对话区零替换**：远端会话的历史、实时流、审批与提问卡片全部由官方组件渲染。没有自绘聊天窗，没有 shadow slot。
+- **隧道不用你建**：填 `user@host` 与私钥路径，插件自己开 SSH 隧道、自己保活重连，本地端口它自己分配。
+- **模型配置增量同步**：服务器连上后，把本机有而远端缺的提供方、默认模型与 API Key 补过去。只补缺，不覆盖远端已有配置。
 
-- **🔌 纯 `/api` 协议实现**
-  不依赖 SSH 执行命令、不做屏幕抓取、不改远端任何配置、**不在远端装任何插件**。远端就是一个未经修改的 `dsh web`。
+#### 📥 把其他工具的历史接进来
 
-**适合谁**：有多台 DSH 机器想统一管理的人；不想为此再开一个桌面壳或手机端的人；本机堆了一堆 Codex/Claude Code 历史对话想翻出来接着聊的人。
+本机 Codex CLI / Claude Code / opencode 聊过的对话，按项目目录归入对应工作区。
 
-**不适合谁**：只有一台机器且不用外部工具的人 —— 这插件对你没有价值。
+- **按软件逐个手动开启**，未点「导入」的软件日志一个字节都不会被读；
+- 找不到对应工作区的项目会**自动建成真实工作区**（只登记，不创建目录）；目录已不存在的会话自动隐藏；
+- 导入的会话在树里**只读**；直接向它发消息会**自动转成真实 DSH 会话**（保留用户/助手对话，原只读副本隐藏）；
+- 源日志**只读打开**，从不改写、从不删除。
+
+#### 两件事共用的底子
+
+- **纯 `/api` 协议**：不靠 SSH 执行命令、不做屏幕抓取、不改远端配置、**远端不装任何插件** —— 远端就是一个未经修改的 `dsh web`。
+- **官方 UI 零改动**：不替换侧边栏、不替换对话区。插件只在数据层做合并与路由。
+
+**只有一台机器？** 第二件事照样成立 —— 不填任何服务器，只开导入，把本机 Codex / Claude Code / opencode 的历史接进来即可。
+
+**不适合谁**：只有一台机器、也没用过这三个工具的人 —— 那这插件对你没有价值。
 
 ## 安装
 
@@ -120,15 +134,24 @@ dsh plugin --profile web add dsh-session-hub@alpha
 |---|---|
 | 本机 DSH | 实测 `@deepseek-ai/dsh@0.1.0-rc.6`；mainline 未逐 commit 跟踪 |
 | Node | `^22.19 \|\| >=24`（用到内置 `WebSocket` / `fetch`） |
-| 远端 DSH | 任何能应答标准 `/api` 的 `dsh web` —— **远端无需安装本插件** |
 | 浏览器 | 官方 Web UI，无版本约束（插件不替换任何 UI） |
+| 远端 DSH | 仅接远端时需要：任何能应答标准 `/api` 的 `dsh web` —— **远端无需安装本插件** |
+| 外部工具 | 仅导入时需要：本机装过 Codex CLI / Claude Code / opencode 中的任意一个，读它们默认的日志位置 |
 
-**最后验证 2026-08-14**：本机 Windows + Node v24.9.0 ↔ 远端 OpenCloudOS 9.4 + Node v24.9.0，
-经 SSH 隧道跑通跨机对话、审批应答与实时流全链路。
+**最后验证 2026-08-14**：
+远端侧 —— 本机 Windows + Node v24.9.0 ↔ 远端 OpenCloudOS 9.4 + Node v24.9.0，经 SSH 隧道跑通跨机对话、审批应答与实时流全链路；
+导入侧 —— 本机解析 615 个会话（Codex 523 / Claude Code 67 / opencode 25），归入 21 个工作区，只读会话转真实会话已验证。
 
 > Alpha 期间：配置格式、路由表、`/hub/events` 帧协议在 1.0 前可能破坏性变更。
 
 ## 快速开始
+
+装完插件后按你要的那件事往下走 —— 两条路互不依赖：
+
+- 只想把本机 Codex / Claude Code / opencode 的历史接进来 → 直接跳到 **[导入本机其他工具的会话](#导入本机其他工具的会话)**，三次点击就完事，不用配服务器、不用隧道。
+- 想接远端机器 → 从下面这个最小示例开始。
+
+### 接一台远端机器
 
 **最小可复现示例：一台远端 + 本机 hub + SSH 隧道。**
 
@@ -175,9 +198,9 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 > 隧道进程活在 dsh 里：dsh 退出时一并关闭，启动时按保存的配置自动重建（端口每次重新分配，所以配置存的是 SSH
 > 目标而不是 URL）。SSH 掉线会以退避重连，恢复后链接自动指向新端口。
 
-### 导入本机其他工具的会话（可选）
+### 导入本机其他工具的会话
 
-**设置 → 插件 → 会话枢纽 → 外部会话**，按软件点「导入」：
+**不需要任何服务器或隧道。** 打开 **设置 → 插件 → 会话枢纽 → 外部会话**，按软件点「导入」：
 
 | 软件 | 读取位置 |
 |---|---|
@@ -191,6 +214,29 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 - 导入的会话在树里**只读**；直接向它发消息会自动转成真实 DSH 会话（保留用户/助手对话，原只读副本隐藏）。
 
 ## 配置
+
+四个功能开关**默认全开**，装完即用。只要其中一件时把另一件关掉：
+
+```yaml
+# 只要导入，不要多服务器（单机用户的典型配置）
+- id: dsh-session-hub
+  config:
+    features:
+      aggregate: false
+      tunnel: false
+      modelSync: false
+```
+
+```yaml
+# 只要多服务器，不碰本机其他工具的日志
+- id: dsh-session-hub
+  config:
+    features:
+      importer: false
+```
+
+**关闭 = 不存在，不是闲置**：关掉的功能不构造服务、不读缓存、不扫目录、不注册路由，也不在设置页出现。
+四个全关时插件等于没装（不拦截任何 `/api`）。
 
 | 配置项 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -217,6 +263,8 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 
 一句话：**读你本机的会话日志（需你逐个授权）、和你配置的服务器通信、不碰你的项目文件**。
 
+下面每一项都只在对应功能开着时才发生 —— 关掉导入就不读任何日志，关掉聚合就不发起任何出站连接。
+
 <details>
 <summary><b>完整清单（文件 / 网络 / 凭据 / 会话内容）</b></summary>
 
@@ -229,8 +277,6 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 - 出站（对每个已配置服务器 `baseUrl`）：HTTP `POST /api/*`（unary RPC）+ WebSocket 升级 `/api/events.mux`、`/api/events.host`；
 - 入站（本机进程内）：`/hub/events` SSE（仅环回 Host + 随机 token + 浏览器 same-origin 三重校验）、Typert `/api/sessionHub/*`（环回）；
 - 入站（浏览器）：被拦截的 `/api/session.*` 与 `/api/respond` 会经网关再校验环回/`trustedHosts`。
-
-> 四个开关默认全开，装完即用。只想要其中一部分时在 `cordis.patch.yml` 里关掉其余的 —— 关闭的功能不构造、不扫描、不注册路由，也不在设置页出现。四个全关时插件等于没装（不拦截任何 `/api`）。
 
 **SSH 密钥**：SSH 隧道条目会按你填写的路径读取私钥（仅用于建立那条隧道），密钥内容不落盘、不外传、不写进插件配置 —— 配置里只存路径。留空则走 ssh agent，插件完全不接触密钥材料。
 
@@ -250,6 +296,10 @@ dsh plugin --profile web add https://github.com/Asaiuta/dsh-session-hub/archive/
 | 会话列表少了一项 | 冷启动后远端首个 `session.list` 拉取未完成；打开会话本身会触发重拉 |
 | 实时流断开（LIVE 徽标变灰） | SSE 自动重连；发送后 900ms 无实时事件自动回退历史重载 |
 | 插件未生效 | 检查 `dsh plugin` 后是否重启 web；看启动日志有无 `dsh-session-hub` 加载与 gateway 使能信息 |
+| 点了「导入」但树里没有 | 该软件的会话所属项目目录已不存在 —— 目录不在磁盘上的会话会被自动隐藏；恢复目录后一个扫描周期内回来 |
+| 导入的会话发不出消息 | 正常：导入会话只读。直接发送会自动转成真实 DSH 会话，之后照常对话 |
+| 某个软件显示「未安装」 | 只按默认路径查找（`~/.codex` / `~/.claude` / `~/.local/share/opencode`）；装在别处目前无法指定 |
+| 移除某个软件后别的也少了 | 0.1.0-alpha.1 之前的缺陷（跨源误删），升级即可 |
 
 **日志位置**：`dsh web` 进程 stdout/stderr——systemd 部署 `journalctl -u dsh-web`，nohup 部署看输出文件；本地终端部署看控制台。
 
@@ -290,10 +340,17 @@ npm run build        # esbuild → lib/index.js + lib/client.js + lib/types/
 │   ├── HubGateway（exact 路由优先于官方 /api prefix）           │
 │   │    接管 session.list/history/prompt/cancel/rename/fork/    │
 │   │    models/selectModel/updateQueue/attachment/search/respond│
-│   │    按会话归属路由：远端 → ServerLink，本地 → 官方 ApiProxy  │
-│   │    session.list 合并去重（官方 items + 远端 rows）          │
+│   │    + workspace.list/rename/delete/archiveSession           │
+│   │    按会话归属三路分派：远端 → ServerLink、导入 → ImportStore│
+│   │    、本地 → 官方 ApiProxy                                  │
+│   │    session.list 合并去重（官方 + 远端 + 导入）              │
+│   ├── ImportStore（外部会话导入，按软件手动开启）             │
+│   │    只读解析 codex/claude/opencode 日志 → 规范会话模型      │
+│   │    按 mtime 增量扫描，缓存 dsh-session-hub-imports.json    │
+│   │    按 cwd 最长前缀归入工作区；无对应工作区的项目自动登记    │
+│   │    首次发消息 → promote 成真实 DSH 会话（官方 create+replay）│
 │   └── SessionHubRuntime (TypertRemoteService @Remote)          │
-│        暴露 wire 命名空间 sessionHub（服务器管理/远端建会话）   │
+│        暴露 wire 命名空间 sessionHub（服务器管理/导入开关/同步）│
 │  SSE /hub/events（随机 token + 环回 + same-origin 三重围栏）    │
 └──────────────┬────────────────────────────────────────────────┘
                │ 官方 /api unary（浏览器→网关→路由）
@@ -305,7 +362,8 @@ npm run build        # esbuild → lib/index.js + lib/client.js + lib/types/
 │  · 官方对话区：远端会话 open() 走 /api/session.history 网关路由，│
 │    实时 mux 帧由 client 桥 (startOfficialBridge) 注入官方       │
 │    sessions.handleMuxEnvelope → 官方逐 token 流式渲染/审批卡   │
-│  · 设置 → 插件 → Session Hub：服务器增删/状态/探活、远端新建    │
+│  · 设置 → 插件 → 会话枢纽：服务器增删/状态/探活、按软件导入、  │
+│    模型同步                                                    │
 └────────────────────────────────────────────────────────────────┘
 ```
 
