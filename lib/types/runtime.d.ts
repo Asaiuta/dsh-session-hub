@@ -7,7 +7,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
-import type { HistoryEntry, SessionModels, SessionSummary } from '@deepseek-ai/dsh-host-apiproxy';
+import type { HistoryEntry, SessionSummary } from '@deepseek-ai/dsh-host-apiproxy';
 import type { HubSnapshot, ImportSourceStatusView, PendingRow, ServerId, ServerView } from './contract.ts';
 import { ServerRegistry } from './hub/registry.ts';
 import type { ModelSyncService } from './hub/model-sync.ts';
@@ -57,91 +57,16 @@ export declare class SessionHubRuntime extends TypertRemoteService {
             skipped: string[];
         }>;
     }>;
-    serversList(_payload: Record<string, never>): ServerView[];
     serversAdd(payload: {
         name: string;
         baseUrl: string;
     }): Promise<ServerView>;
-    serversUpdate(payload: {
-        id: ServerId;
-        name?: string;
-        baseUrl?: string;
-    }): ServerView;
     serversRemove(payload: {
         id: ServerId;
     }): {
         removed: true;
     };
     snapshot(_payload: Record<string, never>): HubSnapshot;
-    sessionHistory(payload: {
-        serverId: ServerId;
-        sessionId: string;
-        maxMessages?: number;
-    }): Promise<{
-        events: HistoryEntry[];
-        hasMore: boolean;
-    }>;
-    sessionPrompt(payload: {
-        serverId: ServerId;
-        sessionId: string;
-        text: string;
-    }): Promise<{
-        accepted: true;
-    }>;
-    sessionCancel(payload: {
-        serverId: ServerId;
-        sessionId: string;
-    }): Promise<{
-        accepted: true;
-    }>;
-    sessionRename(payload: {
-        serverId: ServerId;
-        sessionId: string;
-        title: string;
-    }): Promise<{
-        title: string;
-        seq: number;
-    }>;
-    sessionFork(payload: {
-        serverId: ServerId;
-        sessionId: string;
-        atSeq?: number;
-    }): Promise<{
-        sessionId: string;
-    }>;
-    sessionCreate(payload: {
-        serverId: ServerId;
-        workspaceId?: string;
-        cwd?: string;
-        agentPreset?: string;
-    }): Promise<{
-        sessionId: string;
-        agentPreset?: string;
-    }>;
-    sessionModels(payload: {
-        serverId: ServerId;
-        sessionId: string;
-    }): Promise<SessionModels>;
-    sessionSelectModel(payload: {
-        serverId: ServerId;
-        sessionId: string;
-        provider: string;
-        model: string;
-        reasoningEffort?: string;
-    }): Promise<{
-        selected: {
-            provider: string;
-            model: string;
-            reasoningEffort?: string;
-        };
-    }>;
-    respond(payload: {
-        serverId: ServerId;
-        rpcId: string;
-        value: unknown;
-    }): Promise<{
-        accepted: true;
-    }>;
     /** Probe a candidate endpoint without adding it (used by the panel's Test button). */
     serversProbe(payload: {
         baseUrl: string;

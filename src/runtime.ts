@@ -118,11 +118,6 @@ export class SessionHubRuntime extends TypertRemoteService {
   // ---- Server registry ----
 
   @Remote
-  serversList(_payload: Record<string, never>): ServerView[] {
-    return out(this.registry.serversList())
-  }
-
-  @Remote
   async serversAdd(payload: { name: string; baseUrl: string }): Promise<ServerView> {
     try {
       const view = await this.registry.add(payload.name, payload.baseUrl)
@@ -130,14 +125,6 @@ export class SessionHubRuntime extends TypertRemoteService {
     } catch (error) {
       return fail('self-loop', error instanceof Error ? error.message : String(error))
     }
-  }
-
-  @Remote
-  serversUpdate(payload: { id: ServerId; name?: string; baseUrl?: string }): ServerView {
-    return out(this.registry.update(payload.id, {
-      ...(payload.name === undefined ? {} : { name: payload.name }),
-      ...(payload.baseUrl === undefined ? {} : { baseUrl: payload.baseUrl }),
-    }))
   }
 
   @Remote
@@ -151,87 +138,6 @@ export class SessionHubRuntime extends TypertRemoteService {
   @Remote
   snapshot(_payload: Record<string, never>): HubSnapshot {
     return out(this.registry.snapshot())
-  }
-
-  // ---- Session actions (each routed to the owning remote link) ----
-
-  @Remote
-  sessionHistory(payload: { serverId: ServerId; sessionId: string; maxMessages?: number }):
-    Promise<{ events: HistoryEntry[]; hasMore: boolean }> {
-    return withLink(this.registry, payload.serverId, 'history',
-      link => link.history(payload.sessionId, payload.maxMessages).then(out))
-  }
-
-  @Remote
-  sessionPrompt(payload: { serverId: ServerId; sessionId: string; text: string }):
-    Promise<{ accepted: true }> {
-    return withLink(this.registry, payload.serverId, 'prompt',
-      link => link.prompt(payload.sessionId, payload.text).then(out))
-  }
-
-  @Remote
-  sessionCancel(payload: { serverId: ServerId; sessionId: string }): Promise<{ accepted: true }> {
-    return withLink(this.registry, payload.serverId, 'cancel',
-      link => link.cancel(payload.sessionId).then(out))
-  }
-
-  @Remote
-  sessionRename(payload: { serverId: ServerId; sessionId: string; title: string }):
-    Promise<{ title: string; seq: number }> {
-    return withLink(this.registry, payload.serverId, 'rename',
-      link => link.rename(payload.sessionId, payload.title).then(out))
-  }
-
-  @Remote
-  sessionFork(payload: { serverId: ServerId; sessionId: string; atSeq?: number }):
-    Promise<{ sessionId: string }> {
-    return withLink(this.registry, payload.serverId, 'fork',
-      link => link.fork(payload.sessionId, payload.atSeq).then(out))
-  }
-
-  @Remote
-  sessionCreate(payload: { serverId: ServerId; workspaceId?: string; cwd?: string; agentPreset?: string }):
-    Promise<{ sessionId: string; agentPreset?: string }> {
-    return withLink(this.registry, payload.serverId, 'create',
-      link => link.create({
-        ...(payload.workspaceId === undefined ? {} : { workspaceId: payload.workspaceId }),
-        ...(payload.cwd === undefined ? {} : { cwd: payload.cwd }),
-        ...(payload.agentPreset === undefined ? {} : { agentPreset: payload.agentPreset }),
-      }).then(out))
-  }
-
-  @Remote
-  sessionModels(payload: { serverId: ServerId; sessionId: string }): Promise<SessionModels> {
-    return withLink(this.registry, payload.serverId, 'models',
-      link => link.models(payload.sessionId).then(out))
-  }
-
-  @Remote
-  sessionSelectModel(payload: {
-    serverId: ServerId
-    sessionId: string
-    provider: string
-    model: string
-    reasoningEffort?: string
-  }): Promise<{ selected: { provider: string; model: string; reasoningEffort?: string } }> {
-    return withLink(this.registry, payload.serverId, 'selectModel',
-      link => link.selectModel(payload.sessionId, {
-        provider: payload.provider,
-        model: payload.model,
-        ...(payload.reasoningEffort === undefined ? {} : { reasoningEffort: payload.reasoningEffort }),
-      }).then(out))
-  }
-
-  @Remote
-  respond(payload: { serverId: ServerId; rpcId: string; value: unknown }): Promise<{ accepted: true }> {
-    return withLink(this.registry, payload.serverId, 'respond',
-      link => link.respond(payload.rpcId, payload.value).then(result => {
-        if (result.ok) {
-          if (result.value.accepted) return { ok: true as const, value: { accepted: true as const } }
-          fail('not-pending', `remote rejected the response (${result.value.reason})`)
-        }
-        return result as ActionResult<{ accepted: true }>
-      }).then(out))
   }
 
   /** Probe a candidate endpoint without adding it (used by the panel's Test button). */

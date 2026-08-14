@@ -25,21 +25,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   /** The `sessionHub` namespace face mounted under `ctx.remote.sessionHub`. */
   interface TypertRemoteNamespace$73657373696f6e487562 extends SessionHubNamespaceFace {}
   interface TypertRemoteMap {
-    'sessionHub/serversList': SessionHubNamespaceFace['serversList']
     'sessionHub/serversAdd': SessionHubNamespaceFace['serversAdd']
-    'sessionHub/serversUpdate': SessionHubNamespaceFace['serversUpdate']
     'sessionHub/serversRemove': SessionHubNamespaceFace['serversRemove']
     'sessionHub/serversProbe': SessionHubNamespaceFace['serversProbe']
     'sessionHub/snapshot': SessionHubNamespaceFace['snapshot']
-    'sessionHub/sessionHistory': SessionHubNamespaceFace['sessionHistory']
-    'sessionHub/sessionPrompt': SessionHubNamespaceFace['sessionPrompt']
-    'sessionHub/sessionCancel': SessionHubNamespaceFace['sessionCancel']
-    'sessionHub/sessionRename': SessionHubNamespaceFace['sessionRename']
-    'sessionHub/sessionFork': SessionHubNamespaceFace['sessionFork']
-    'sessionHub/sessionCreate': SessionHubNamespaceFace['sessionCreate']
-    'sessionHub/sessionModels': SessionHubNamespaceFace['sessionModels']
-    'sessionHub/sessionSelectModel': SessionHubNamespaceFace['sessionSelectModel']
-    'sessionHub/respond': SessionHubNamespaceFace['respond']
+    'sessionHub/modelSync': SessionHubNamespaceFace['modelSync']
+    'sessionHub/importStatus': SessionHubNamespaceFace['importStatus']
+    'sessionHub/importAction': SessionHubNamespaceFace['importAction']
   }
   interface TypertRemoteNamespaceMap {
     sessionHub: TypertRemoteNamespace$73657373696f6e487562

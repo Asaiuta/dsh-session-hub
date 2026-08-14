@@ -168,49 +168,14 @@ const serverAddPayloadSchema = z.object({
   baseUrl: z.string().min(1),
 }).passthrough()
 
-const serverUpdatePayloadSchema = z.object({
-  id: serverIdSchema,
-  name: z.string().optional(),
-  baseUrl: z.string().optional(),
-}).passthrough()
 
 const serverIdPayloadSchema = z.object({ id: serverIdSchema }).passthrough()
 
-const sessionTargetPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-}).passthrough()
 
-const sessionHistoryPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-  maxMessages: z.number().int().positive().optional(),
-}).passthrough()
 
-const sessionPromptPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-  text: z.string().min(1),
-}).passthrough()
 
-const sessionRenamePayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-  title: z.string().min(1),
-}).passthrough()
 
-const sessionForkPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-  atSeq: z.number().int().nonnegative().optional(),
-}).passthrough()
 
-const sessionCreatePayloadSchema = z.object({
-  serverId: serverIdSchema,
-  workspaceId: z.string().optional(),
-  cwd: z.string().optional(),
-  agentPreset: z.string().optional(),
-}).passthrough()
 
 const modelSyncPayloadSchema = z.object({
   serverId: serverIdSchema.optional(),
@@ -264,20 +229,7 @@ const importActionPayloadSchema = z.object({
   auto: z.boolean().optional(),
 }).passthrough()
 
-const sessionSelectModelPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  sessionId: z.string().min(1),
-  provider: z.string().min(1),
-  model: z.string().min(1),
-  reasoningEffort: z.string().optional(),
-}).passthrough()
 
-const respondPayloadSchema = z.object({
-  serverId: serverIdSchema,
-  rpcId: z.string().min(1),
-  /** The response value slot verbatim (approval outcome or question answers). */
-  value: z.unknown(),
-}).passthrough()
 
 const probePayloadSchema = z.object({ baseUrl: z.string().min(1) }).passthrough()
 
@@ -287,29 +239,6 @@ const probeResultSchema = z.discriminatedUnion('ok', [
 ])
 
 const removedResultSchema = z.object({ removed: z.literal(true) }).passthrough()
-const acceptedResultSchema = z.object({ accepted: z.literal(true) }).passthrough()
-const historyResultSchema = z.object({
-  events: z.array(z.object({
-    seq: z.number(),
-    event: z.unknown(),
-    view: z.unknown().optional(),
-  }).passthrough()),
-  hasMore: z.boolean(),
-}).passthrough()
-const renameResultSchema = z.object({ title: z.string(), seq: z.number() }).passthrough()
-const forkResultSchema = z.object({ sessionId: z.string() }).passthrough()
-const createResultSchema = z.object({
-  sessionId: z.string(),
-  agentPreset: z.string().optional(),
-}).passthrough()
-const modelsResultSchema = z.unknown()
-const selectModelResultSchema = z.object({
-  selected: z.object({
-    provider: z.string(),
-    model: z.string(),
-    reasoningEffort: z.string().optional(),
-  }).passthrough(),
-}).passthrough()
 
 function codec(typeSymbol: string, schema: z.ZodType): InvocationDescriptor['parameters'][number]['codec'] {
   return { mode: 'strict', typeSymbol, schema }
@@ -344,20 +273,9 @@ function descriptor(
 
 /** The sessionHub namespace's strict invocation descriptors (host manifest + client mount share this). */
 export const SESSION_HUB_INVOCATIONS: readonly InvocationDescriptor[] = [
-  descriptor('serversList', z.object({}), 'dsh-session-hub#Empty', z.array(serverViewSchema), 'dsh-session-hub#ServerViewList'),
   descriptor('serversAdd', serverAddPayloadSchema, 'dsh-session-hub#ServerAddPayload', serverViewSchema, 'dsh-session-hub#ServerView'),
-  descriptor('serversUpdate', serverUpdatePayloadSchema, 'dsh-session-hub#ServerUpdatePayload', serverViewSchema, 'dsh-session-hub#ServerView'),
   descriptor('serversRemove', serverIdPayloadSchema, 'dsh-session-hub#ServerIdPayload', removedResultSchema, 'dsh-session-hub#RemovedResult'),
   descriptor('snapshot', z.object({}), 'dsh-session-hub#Empty', hubSnapshotSchema, 'dsh-session-hub#HubSnapshot'),
-  descriptor('sessionHistory', sessionHistoryPayloadSchema, 'dsh-session-hub#SessionHistoryPayload', historyResultSchema, 'dsh-session-hub#HistoryResult'),
-  descriptor('sessionPrompt', sessionPromptPayloadSchema, 'dsh-session-hub#SessionPromptPayload', acceptedResultSchema, 'dsh-session-hub#AcceptedResult'),
-  descriptor('sessionCancel', sessionTargetPayloadSchema, 'dsh-session-hub#SessionTargetPayload', acceptedResultSchema, 'dsh-session-hub#AcceptedResult'),
-  descriptor('sessionRename', sessionRenamePayloadSchema, 'dsh-session-hub#SessionRenamePayload', renameResultSchema, 'dsh-session-hub#RenameResult'),
-  descriptor('sessionFork', sessionForkPayloadSchema, 'dsh-session-hub#SessionForkPayload', forkResultSchema, 'dsh-session-hub#ForkResult'),
-  descriptor('sessionCreate', sessionCreatePayloadSchema, 'dsh-session-hub#SessionCreatePayload', createResultSchema, 'dsh-session-hub#CreateResult'),
-  descriptor('sessionModels', sessionTargetPayloadSchema, 'dsh-session-hub#SessionTargetPayload', modelsResultSchema, 'dsh-session-hub#SessionModels'),
-  descriptor('sessionSelectModel', sessionSelectModelPayloadSchema, 'dsh-session-hub#SessionSelectModelPayload', selectModelResultSchema, 'dsh-session-hub#SelectModelResult'),
-  descriptor('respond', respondPayloadSchema, 'dsh-session-hub#RespondPayload', acceptedResultSchema, 'dsh-session-hub#AcceptedResult'),
   descriptor('modelSync', modelSyncPayloadSchema, 'dsh-session-hub#ModelSyncPayload', modelSyncResultSchema, 'dsh-session-hub#ModelSyncResult'),
   descriptor('importStatus', emptyPayloadSchema, 'dsh-session-hub#EmptyPayload', importStatusResultSchema, 'dsh-session-hub#ImportStatusResult'),
   descriptor('importAction', importActionPayloadSchema, 'dsh-session-hub#ImportActionPayload', importStatusResultSchema, 'dsh-session-hub#ImportStatusResult'),

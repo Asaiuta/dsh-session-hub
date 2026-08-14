@@ -390,16 +390,6 @@ function ServerRow(props: {
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
 
-  const createSession = async (): Promise<void> => {
-    if (props.hub === undefined) return
-    setBusy(true)
-    try {
-      await props.hub.sessionCreate({ serverId: props.serverId })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const removeServer = async (): Promise<void> => {
     if (props.hub === undefined) return
     setBusy(true)
@@ -422,10 +412,10 @@ function ServerRow(props: {
       {props.state !== 'connected' && props.lastError !== undefined && (
         <span className="dsh-hub-error" title={props.lastError}>!</span>
       )}
-      <button type="button" className="dsh-hub-btn icon" title={t('new')} disabled={busy}
-        onClick={() => { void createSession() }}>
-        <IconPlusOutline16 size={14} />
-      </button>
+      {/* No "new session" button here: the official tree already offers one on
+          this server's group, where the new session is immediately visible.
+          A second entry point in a modal that gives no feedback was only ever
+          a way to create sessions nobody could find. */}
       <button type="button" className="dsh-hub-btn icon" title={t('remove')} disabled={busy}
         onClick={() => { void removeServer() }}>
         <IconTrashOutline16 size={14} />
