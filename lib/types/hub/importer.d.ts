@@ -56,6 +56,12 @@ export declare class ImportStore {
     private dbLive;
     /** Notified when an already-known session grows new turns. */
     private onGrowth;
+    /**
+     * Highest seq already pushed live, per session. Live numbering must rise
+     * monotonically even though buildHistory renumbers from zero over a turn
+     * list that shrinks back once a session is capped.
+     */
+    private readonly liveSeq;
     /** How many external sessions are currently held. */
     get size(): number;
     constructor(dataFile: string);

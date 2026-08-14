@@ -77,16 +77,26 @@ export function apply(ctx: ClientContext): void {
     let pollTimer: ReturnType<typeof setInterval> | undefined
     let cancelled = false
     const tick = async (): Promise<void> => {
-      if (hub === undefined || cancelled) return
+      if (hub === undefined || cancelled) {
+        if (!cancelled && ticks < 3) {
+          console.warn('[dsh-session-hub] snapshot skipped: remote face not mounted yet')
+          ticks += 1
+        }
+        return
+      }
       try {
         const result = await hub.snapshot({})
         if (result.ok) {
+          console.info('[dsh-session-hub] opening live stream')
           ensureHubLive(result.value.eventToken)
+        } else {
+          console.warn('[dsh-session-hub] snapshot failed:', result.error)
         }
-      } catch {
-        // the interval will retry
+      } catch (error) {
+        console.warn('[dsh-session-hub] snapshot threw:', error)
       }
     }
+    let ticks = 0
     void tick()
     pollTimer = setInterval(() => { void tick() }, 3000)
     // Frame reception also debounces a token refresh (host restarts rotate

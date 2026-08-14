@@ -317,6 +317,12 @@ export class ImportStore {
   private dbLive = new Set<string>()
   /** Notified when an already-known session grows new turns. */
   private onGrowth: ((sessionId: string, event: unknown) => void) | undefined
+  /**
+   * Highest seq already pushed live, per session. Live numbering must rise
+   * monotonically even though buildHistory renumbers from zero over a turn
+   * list that shrinks back once a session is capped.
+   */
+  private readonly liveSeq = new Map<string, number>()
 
   /** How many external sessions are currently held. */
   get size(): number {
@@ -596,11 +602,24 @@ export class ImportStore {
         ? next.turns
         : next.turns.filter(t => t.time > lastBefore.time)
       if (fresh.length === 0) continue
-      // Emit only the new tail, numbered as buildHistory numbers the whole
-      // session, so the client's seq-dedup stitches it onto what it holds.
-      const full = buildHistory(next)
-      const tail = buildHistory({ ...next, turns: fresh })
-      for (const entry of full.slice(full.length - tail.length)) emit(id, entry.event)
+
+      // The client drops any event whose seq it has already passed, so the
+      // numbering has to rise forever. buildHistory renumbers from zero over
+      // the *current* turn list, which shrinks back every time a capped
+      // session drops its oldest turn — emitting those numbers directly made
+      // seq go backwards (455 then 452) and the client discarded the frames.
+      // Keep a per-session high-water mark and count up from it instead.
+      const base = Math.max(
+        this.liveSeq.get(id) ?? 0,
+        buildHistory(next).length,
+      )
+      let seq = base
+      for (const entry of buildHistory({ ...next, turns: fresh })) {
+        const event = entry.event as { seq?: number, [key: string]: unknown }
+        emit(id, { ...event, seq })
+        seq += 1
+      }
+      this.liveSeq.set(id, seq)
     }
   }
 

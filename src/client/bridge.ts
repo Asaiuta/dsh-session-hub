@@ -62,7 +62,12 @@ export function startOfficialBridge(
   sessions: OfficialSessions | undefined,
   workspaces: OfficialWorkspaces | undefined,
 ): () => void {
-  if (sessions === undefined) return () => {}
+  if (sessions === undefined) {
+    console.warn('[dsh-session-hub] bridge OFF: official sessions runtime not reachable')
+    return () => {}
+  }
+  console.info('[dsh-session-hub] bridge on (sessions ok, workspaces %s)',
+    workspaces === undefined ? 'missing' : 'ok')
   return subscribeFrames(({ rpcId, frame }) => {
     const type = typeof frame === 'object' && frame !== null
       ? (frame as { type?: unknown }).type
@@ -89,6 +94,11 @@ export function startOfficialBridge(
       return
     }
     try {
+      const f = frame as { type?: string, sessionId?: string, event?: { seq?: number } }
+      if (f.type === 'session/event') {
+        console.debug('[dsh-session-hub] → mux session/event %s seq=%s',
+          f.sessionId, f.event?.seq)
+      }
       sessions.handleMuxEnvelope({
         type: 'server-request',
         rpcId,
