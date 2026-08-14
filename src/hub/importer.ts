@@ -305,7 +305,7 @@ async function scanJsonl(
 
 /** mtime-indexed, persisted, incremental external-session store. */
 export class ImportStore {
-  private sessions = new Map<string, ImportedSession>()
+  readonly sessions = new Map<string, ImportedSession>()
   private readonly cache: CacheFile
   private readonly cachePath: string
   private scanning = false
@@ -315,19 +315,6 @@ export class ImportStore {
   private watcher: ImportWatcher | undefined
   /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
   private dbLive = new Set<string>()
-  /** Notified when an already-known session grows new turns. */
-  private onGrowth: ((sessionId: string, event: unknown) => void) | undefined
-  /**
-   * Highest seq already pushed live, per session. Live numbering must rise
-   * monotonically even though buildHistory renumbers from zero over a turn
-   * list that shrinks back once a session is capped.
-   */
-  private readonly liveSeq = new Map<string, number>()
-
-  /** How many external sessions are currently held. */
-  get size(): number {
-    return this.sessions.size
-  }
 
   constructor(dataFile: string) {
     this.cachePath = dataFile
@@ -551,8 +538,7 @@ export class ImportStore {
    * earlier versions that stored the raw control records.
    */
   private rebuildIndex(): void {
-    const previous = this.sessions
-    this.sessions = new Map<string, ImportedSession>()
+    this.sessions.clear()
     let changed = false
     const sanitized: ImportedSession[] = []
     for (const s of this.cache.sessions) {
@@ -568,96 +554,6 @@ export class ImportStore {
       this.cache.sessions = sanitized
       void this.persist()
     }
-    this.emitGrowth(previous)
-  }
-
-  /**
-   * Announce turns that appeared since the previous index.
-   *
-   * The tree learns about new sessions by re-reading `session.list`, but an
-   * *open* conversation only ever grows from `session/event` frames. Without
-   * this the watcher would keep the running dot honest while the transcript
-   * below it stayed frozen until the user reloaded the page.
-   *
-   * Only the tail is emitted, carrying the same seq numbering `buildHistory`
-   * assigns, so the official client's seq-dedup stitches it onto the history
-   * it already holds exactly as it does for a remote session.
-   *
-   * @param previous - the session index as it was before this rebuild.
-   */
-  private emitGrowth(previous: Map<string, ImportedSession>): void {
-    const emit = this.onGrowth
-    if (emit === undefined || previous.size === 0) return
-    for (const [id, next] of this.sessions) {
-      const before = previous.get(id)
-      if (before === undefined) continue
-      // Length is not a growth signal: a session at MAX_TURNS stays exactly
-      // that long forever, dropping its oldest turn for each new one. Compare
-      // the tail's timestamp instead, which only ever moves forward.
-      const lastBefore = before.turns[before.turns.length - 1]
-      const lastNext = next.turns[next.turns.length - 1]
-      if (lastNext === undefined) continue
-      if (lastBefore !== undefined && lastNext.time <= lastBefore.time) continue
-      const fresh = lastBefore === undefined
-        ? next.turns
-        : next.turns.filter(t => t.time > lastBefore.time)
-      if (fresh.length === 0) continue
-
-      // Two constraints pull in opposite directions here.
-      //
-      // The client drops an event at or below the seq it already holds, and
-      // it *buffers* (does not render) an event more than one past it,
-      // treating the gap as a reconnect artifact to repair. So live seq must
-      // be strictly tailSeq + 1 — contiguous, not merely increasing.
-      //
-      // buildHistory renumbers from zero over the current turn list, which
-      // stops growing once a session is capped: each new turn drops the
-      // oldest. Emitting those numbers directly made seq go backwards. But a
-      // free-running high-water mark drifts ahead of the history page the
-      // client actually loaded, so every frame landed in the gap buffer and
-      // the transcript froze after the first one.
-      //
-      // The fix is to stop inventing numbers: pin the session's seq base at
-      // the length of the history the client was served, and count the new
-      // tail up from exactly there. `history()` reads the same base, so the
-      // two can never disagree.
-      const base = this.seqBase(id, next)
-      let seq = base
-      for (const entry of buildHistory({ ...next, turns: fresh })) {
-        const event = entry.event as { seq?: number, [key: string]: unknown }
-        emit(id, { ...event, seq })
-        seq += 1
-      }
-      this.liveSeq.set(id, seq)
-    }
-  }
-
-  /**
-   * The seq the next live event of this session must carry.
-   *
-   * Pinned on first use to the length of the session's history as
-   * {@link buildHistory} numbers it, then advanced only by live pushes — so
-   * it stays contiguous with what the client loaded even as the underlying
-   * turn list is capped and renumbers itself.
-   *
-   * @param id - hub session id.
-   * @param session - the session's current parsed form.
-   * @returns the seq to assign to the next emitted event.
-   */
-  private seqBase(id: string, session: ImportedSession): number {
-    const pinned = this.liveSeq.get(id)
-    if (pinned !== undefined) return pinned
-    const base = buildHistory(session).length
-    this.liveSeq.set(id, base)
-    return base
-  }
-
-  /**
-   * Subscribe to turns appearing in already-known sessions.
-   * @param listener - receives the session id and one official history event.
-   */
-  onSessionGrowth(listener: (sessionId: string, event: unknown) => void): void {
-    this.onGrowth = listener
   }
 
   /** Persist the parsed cache (deferred debounce handled by caller). */
@@ -855,12 +751,6 @@ export class ImportStore {
   history(sessionId: string): HistoryEvent[] | undefined {
     const session = this.sessions.get(sessionId)
     if (session === undefined || !this.projectExists(session.cwd)) return undefined
-    const events = buildHistory(session)
-    // Re-pin the live base to this page's tail. The client stitches live
-    // events onto exactly what this call returned, so any later push has to
-    // continue this numbering — not a base pinned before the session grew,
-    // and not a fresh renumbering of a turn list that has since been capped.
-    this.liveSeq.set(sessionId, events.length)
-    return events
+    return buildHistory(session)
   }
 }

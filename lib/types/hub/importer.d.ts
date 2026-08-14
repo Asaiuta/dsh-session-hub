@@ -44,7 +44,7 @@ interface HistoryEvent {
 }
 /** mtime-indexed, persisted, incremental external-session store. */
 export declare class ImportStore {
-    private sessions;
+    readonly sessions: Map<string, ImportedSession>;
     private readonly cache;
     private readonly cachePath;
     private scanning;
@@ -54,16 +54,6 @@ export declare class ImportStore {
     private watcher;
     /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
     private dbLive;
-    /** Notified when an already-known session grows new turns. */
-    private onGrowth;
-    /**
-     * Highest seq already pushed live, per session. Live numbering must rise
-     * monotonically even though buildHistory renumbers from zero over a turn
-     * list that shrinks back once a session is capped.
-     */
-    private readonly liveSeq;
-    /** How many external sessions are currently held. */
-    get size(): number;
     constructor(dataFile: string);
     /**
      * Attach the live-tail watcher. Kept out of the constructor so the store
@@ -122,39 +112,6 @@ export declare class ImportStore {
      * earlier versions that stored the raw control records.
      */
     private rebuildIndex;
-    /**
-     * Announce turns that appeared since the previous index.
-     *
-     * The tree learns about new sessions by re-reading `session.list`, but an
-     * *open* conversation only ever grows from `session/event` frames. Without
-     * this the watcher would keep the running dot honest while the transcript
-     * below it stayed frozen until the user reloaded the page.
-     *
-     * Only the tail is emitted, carrying the same seq numbering `buildHistory`
-     * assigns, so the official client's seq-dedup stitches it onto the history
-     * it already holds exactly as it does for a remote session.
-     *
-     * @param previous - the session index as it was before this rebuild.
-     */
-    private emitGrowth;
-    /**
-     * The seq the next live event of this session must carry.
-     *
-     * Pinned on first use to the length of the session's history as
-     * {@link buildHistory} numbers it, then advanced only by live pushes — so
-     * it stays contiguous with what the client loaded even as the underlying
-     * turn list is capped and renumbers itself.
-     *
-     * @param id - hub session id.
-     * @param session - the session's current parsed form.
-     * @returns the seq to assign to the next emitted event.
-     */
-    private seqBase;
-    /**
-     * Subscribe to turns appearing in already-known sessions.
-     * @param listener - receives the session id and one official history event.
-     */
-    onSessionGrowth(listener: (sessionId: string, event: unknown) => void): void;
     /** Persist the parsed cache (deferred debounce handled by caller). */
     persist(): Promise<void>;
     sessionById(sessionId: string): ImportedSession | undefined;

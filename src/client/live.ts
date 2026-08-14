@@ -116,9 +116,9 @@ export function ensureHubLive(token: string): void {
   if (source !== null) source.close()
   sourceToken = token
   setStatus('connecting')
-  const url = new URL(`/hub/events?token=${encodeURIComponent(token)}`, location.origin)
-  console.info('[dsh-session-hub] EventSource ->', url.pathname)
-  const next = new EventSource(url)
+  const next = new EventSource(
+    new URL(`/hub/events?token=${encodeURIComponent(token)}`, location.origin),
+  )
   source = next
   next.addEventListener('frame', (message: MessageEvent<string>) => {
     if (message.data === undefined || message.data === '') return
@@ -145,14 +145,8 @@ export function ensureHubLive(token: string): void {
       })
     }
   })
-  next.onopen = () => {
-    console.info('[dsh-session-hub] live stream open')
-    setStatus('live')
-  }
-  next.onerror = () => {
-    console.warn('[dsh-session-hub] live stream error (EventSource will retry)')
-    setStatus('down')
-  }
+  next.onopen = () => setStatus('live')
+  next.onerror = () => setStatus('down')
 }
 
 /** Current SSE stream status (stopped/connecting/live/down). */
