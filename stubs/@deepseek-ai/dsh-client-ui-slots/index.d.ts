@@ -14,6 +14,8 @@ declare module '@deepseek-ai/cordis' {
           id?: string
           key?: string
           priority?: number
+          order?: number
+          label?: string | (() => string)
           locale?: string
           inject: () => Record<string, unknown>
         },

@@ -1,69 +1,98 @@
-/** dsh-session-hub footer block styles: official CSS tokens first, local
- * fallbacks second — nothing overrides the official sidebar theme. */
+/** dsh-session-hub Settings → Plugins tab styles: official CSS tokens
+ * first, local fallbacks second — nothing overrides the official theme. */
 
 const CSS = `
-.dsh-hub-anchor {
+.dsh-hub-settings {
   display: flex;
   flex-direction: column;
-}
-.dsh-hub-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 2px 4px;
-  border-top: 1px solid var(--dsw-alias-border-l2, #2a2e38);
+  gap: 12px;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.5;
   box-sizing: border-box;
   color: var(--dsw-alias-label-primary, inherit);
-  background: transparent;
 }
-.dsh-hub-section * { box-sizing: border-box; }
-.dsh-hub-section-head {
+.dsh-hub-settings * { box-sizing: border-box; }
+.dsh-hub-settings-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dsh-hub-settings-intro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary, #8b90a0);
+  max-width: 660px;
+}
+.dsh-hub-settings-live {
   display: flex;
   align-items: center;
-  gap: 6px;
+  min-height: 16px;
 }
-.dsh-hub-section-title {
-  flex: 1;
+.dsh-hub-live-on {
+  color: var(--dsw-status-success-fg, #3ecf8e);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--dsw-alias-label-secondary, #8b90a0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.dsh-hub-section-list {
+.dsh-hub-settings-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 170px;
-  overflow: auto;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2e38);
+  border-radius: 12px;
+  background: var(--dsw-alias-button-elevated-fill, #1b1e25);
 }
-.dsh-hub-section-empty { padding: 4px 6px; }
+.dsh-hub-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.dsh-hub-settings-head-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dsh-hub-settings-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+}
 .dsh-hub-server-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 4px;
-  border-radius: 6px;
-  min-height: 26px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  min-height: 34px;
   flex: none;
 }
 .dsh-hub-server-row:hover { background: var(--dsw-alias-interactive-bg-hover, #1d2129); }
 .dsh-hub-server-row .dsh-hub-btn {
   flex: none;
-  padding: 1px;
-  width: 22px;
-  height: 22px;
+  padding: 2px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  visibility: hidden;
 }
-.dsh-hub-server-row:hover .dsh-hub-btn { visibility: visible; }
+.dsh-hub-server-state {
+  flex: none;
+  min-width: 52px;
+}
+.dsh-hub-server-url {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dsh-hub-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--dsw-alias-label-tertiary, #555);
@@ -127,58 +156,6 @@ const CSS = `
 .dsh-hub-form-actions { display: flex; gap: 6px; }
 .dsh-hub-error { color: var(--dsw-status-danger-fg, #e5534b); font-size: 11px; }
 .dsh-hub-live-off { color: var(--dsw-status-danger-fg, #e5534b); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
-
-/* Collapsed-rail control: one icon seat mirroring the official icon-button
-   geometry (36x36 circle, flex:none) with a status dot overlay. */
-.dsh-hub-rail-btn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: 50%;
-  padding: 0;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary, #8b90a0);
-  cursor: pointer;
-  position: relative;
-}
-.dsh-hub-rail-btn:hover { background: var(--dsw-alias-interactive-bg-hover, #1d2129); color: var(--dsw-alias-label-primary, inherit); }
-.dsh-hub-rail-btn .dsh-hub-dot {
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--dsw-specific-sidebar-fill, #17181c);
-}
-
-/* Popup (collapsed-rail menu): anchored above the rail seat, styled as the
-   official popup surface. */
-.dsh-hub-popup {
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 8px);
-  width: 264px;
-  max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  border: 1px solid var(--dsw-alias-border-l2, #2a2e38);
-  border-radius: 12px;
-  background: var(--dsw-specific-popup-fill, var(--dsh-hub-bg, #1b1e25));
-  box-shadow: var(--dsw-elevation-popup, 0 8px 24px rgba(0, 0, 0, 0.45));
-  color: var(--dsw-alias-label-primary, inherit);
-  font-size: 13px;
-  line-height: 1.4;
-  z-index: 60;
-  box-sizing: border-box;
-}
-.dsh-hub-popup * { box-sizing: border-box; }
-.dsh-hub-popup .dsh-hub-section-list { max-height: 220px; }
 `
 
 let injected = false

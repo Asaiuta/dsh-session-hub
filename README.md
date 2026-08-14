@@ -10,7 +10,7 @@
 
 - **官方侧边栏树零改动**：远端会话通过网关合并进 `/api/session.list`，直接出现在官方工作区树，点击即打开；
 - **官方对话区零替换**：远端的会话历史、实时逐 token 流、审批/提问卡片全部由官方组件渲染，插件只做数据桥接；
-- **侧边栏底部 SESSION-HUB 区块**：服务器增删/状态/探活、远端新建会话。
+- **设置 → 插件 → Session Hub**：服务器连接管理（增删/状态/探活、远端新建会话）。侧边栏零改动。
 
 全部通过 DSH 自有的 `/api` 协议原生完成——不依赖 SSH、不做屏幕抓取、不改远端任何配置、不在远端装任何插件。
 
@@ -37,7 +37,7 @@
 dsh plugin --profile web add dsh-session-hub
 ```
 
-（等价于在 `~/.dsh/profiles/web` 目录执行 `pnpm add dsh-session-hub`；本机需要 pnpm。）随后**重启 `dsh web`**。浏览器界面出现侧边栏底部 SESSION-HUB 区块即安装成功。
+（等价于在 `~/.dsh/profiles/web` 目录执行 `pnpm add dsh-session-hub`；本机需要 pnpm。）随后**重启 `dsh web`**。浏览器界面 **设置 → 插件** 中多出 **Session Hub** 标签页即安装成功。
 
 ### 安装（本地源码 / 开发）
 
@@ -79,7 +79,7 @@ dsh plugin --profile web add dsh-session-hub
 ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 
 # ── 浏览器 http://127.0.0.1:3080 ──
-# 1. 侧边栏底部 SESSION-HUB → 「添加服务器」→ 名称: tencent, baseUrl: http://127.0.0.1:3333
+# 1. 设置 → 插件 → Session Hub → 「添加服务器」→ 名称: tencent, baseUrl: http://127.0.0.1:3333
 #    点「测试」（返回远端 DSH 版本即通）→ 添加
 # 2. 官方工作区树出现该服务器的会话（未归档区，合并排序）
 # 3. 点击会话：官方对话区打开——历史加载、实时逐 token 流、审批/提问卡片、发送/取消/重命名
@@ -189,7 +189,7 @@ npm run build        # esbuild → lib/index.js + lib/client.js + lib/types/
 │  · 官方对话区：远端会话 open() 走 /api/session.history 网关路由，│
 │    实时 mux 帧由 client 桥 (startOfficialBridge) 注入官方       │
 │    sessions.handleMuxEnvelope → 官方逐 token 流式渲染/审批卡   │
-│  · 侧边栏底部 SESSION-HUB 区块：服务器增删/状态/探活、远端新建   │
+│  · 设置 → 插件 → Session Hub：服务器增删/状态/探活、远端新建    │
 └────────────────────────────────────────────────────────────────┘
 ```
 

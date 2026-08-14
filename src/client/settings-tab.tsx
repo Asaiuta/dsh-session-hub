@@ -1,13 +1,13 @@
 /**
- * Official sidebar footer block ("HUB servers" management). Renders native
- * to the official sidebar: in the expanded sidebar it is a compact server
- * list under a footer action strip; in the collapsed rail it is one icon
- * button whose popup hosts the same list. The official workspace tree and
- * conversation pane stay untouched — remote sessions arrive through the
- * gateway-merged /api/session.list and the frame bridge.
+ * Settings page: the "Session Hub" tab inside the official Plugins settings
+ * section (`settings.plugins.tab` slot). Server connections are managed here
+ * instead of the sidebar: add/remove/probe servers, per-server new session,
+ * live SSE status. The official workspace tree and conversation pane stay
+ * untouched — remote sessions arrive through the gateway-merged
+ * /api/session.list and the frame bridge.
  */
 import { useEffect, useState } from 'react'
-import { IconGlobeOutline14, IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlusOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HubSnapshot, ServerId } from '../contract.ts'
 import type { SessionHubNamespaceFace } from './face.ts'
 import { getLiveStatus, subscribeLiveChanges, subscribeLiveStatus } from './live.ts'
@@ -44,16 +44,13 @@ async function fetchSnapshot(
   }
 }
 
-/** Shared polling + live-refresh hook for the section and the rail popup. */
+/** Polling + live-change debounced refresh shared by the settings page. */
 function useSnapshot(hub: SessionHubNamespaceFace | undefined): {
   snapshot: HubSnapshot | null
   error: string | null
 } {
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [live, setLive] = useState(getLiveStatus())
-
-  useEffect(() => subscribeLiveStatus(setLive), [])
 
   useEffect(() => {
     if (hub === undefined) return
@@ -90,90 +87,98 @@ function useSnapshot(hub: SessionHubNamespaceFace | undefined): {
     }
   }, [hub])
 
-  void live // status surfaced by the caller via a second hook subscription
   return { snapshot, error }
 }
 
-/** Sidebar footer entry: wide = inline list, rail = icon button + popup. */
-export function ServerSection(props: {
-  hub: () => SessionHubNamespaceFace | undefined
-  wide?: boolean
-}): JSX.Element {
-  const hub = props.hub()
-  const [open, setOpen] = useState(false)
-  const { snapshot, error } = useSnapshot(hub)
-
-  // Close the popup on outside clicks.
-  useEffect(() => {
-    if (!open) return
-    const close = (event: MouseEvent): void => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('.dsh-hub-anchor') === null) setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [open])
-
-  if (props.wide === false) {
-    return (
-      <div className="dsh-hub-anchor" style={{ position: 'relative' }}>
-        <button
-          type="button"
-          className="dsh-hub-rail-btn"
-          title={t('servers')}
-          onClick={() => setOpen(v => !v)}
-        >
-          <IconGlobeOutline14 size={18} />
-          {snapshot !== null && snapshot.servers.length > 0 && (
-            <span className={`dsh-hub-dot ${snapshot.servers.every(s => s.state === 'connected') ? 'connected' : 'error'}`} />
-          )}
-        </button>
-        {open && (
-          <ServerList
-            hub={hub}
-            snapshot={snapshot}
-            error={error}
-            popup
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="dsh-hub-anchor" style={{ width: '100%' }}>
-      <ServerList hub={hub} snapshot={snapshot} error={error} />
-    </div>
-  )
+const STATE_KEY: Record<string, HubKey> = {
+  connected: 'stateConnected',
+  connecting: 'stateConnecting',
+  error: 'stateError',
+  stopped: 'stateStopped',
 }
 
-function ServerList(props: {
-  hub: SessionHubNamespaceFace | undefined
-  snapshot: HubSnapshot | null
-  error: string | null
-  popup?: boolean
-  onClose?: () => void
+/** The "Session Hub" tab inside Settings → Plugins. */
+export function SessionHubSettingsTab(props: {
+  hub: () => SessionHubNamespaceFace | undefined
 }): JSX.Element {
-  const { hub, snapshot, error, popup, onClose } = props
-  const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [probe, setProbe] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const hub = props.hub()
+  const { snapshot, error } = useSnapshot(hub)
   const [live, setLive] = useState(getLiveStatus())
+  const [adding, setAdding] = useState(false)
 
   useEffect(() => subscribeLiveStatus(setLive), [])
 
   const servers = snapshot?.servers ?? []
   const sessions = snapshot?.sessions ?? []
 
-  const reset = (): void => {
-    setName('')
-    setBaseUrl('')
-    setProbe(null)
-    setAdding(false)
-  }
+  return (
+    <div className="dsh-hub-settings">
+      <h2 className="dsh-hub-settings-title">{t('title')}</h2>
+      <p className="dsh-hub-settings-intro">{t('settingsIntro')}</p>
+      <div className="dsh-hub-settings-live">
+        <span className={live === 'live' ? 'dsh-hub-live-on' : 'dsh-hub-live-off'}
+          title={tf('liveOffHint')()}>
+          {live === 'live' ? `● ${t('stateConnected')}` : t('liveOff')}
+        </span>
+      </div>
+
+      <div className="dsh-hub-settings-card">
+        <div className="dsh-hub-settings-head">
+          <span className="dsh-hub-settings-head-title">{t('servers')}</span>
+          <button
+            type="button"
+            className="dsh-hub-btn"
+            onClick={() => setAdding(v => !v)}
+          >
+            <IconPlusOutline16 size={14} />
+            {adding ? t('close') : t('addServer')}
+          </button>
+        </div>
+
+        {adding && (
+          <AddServerForm
+            hub={hub}
+            onDone={() => setAdding(false)}
+          />
+        )}
+
+        {error !== null && <div className="dsh-hub-error">{tf('actionError')(error)}</div>}
+
+        {servers.length === 0 && !adding && (
+          <div className="dsh-hub-muted dsh-hub-settings-empty">
+            {t('noServers')}
+            <button type="button" className="dsh-hub-btn" onClick={() => setAdding(true)}>
+              {t('addServer')}
+            </button>
+          </div>
+        )}
+
+        {servers.map(server => (
+          <ServerRow
+            key={server.id}
+            hub={hub}
+            serverId={server.id}
+            name={server.name}
+            state={server.state}
+            lastError={server.lastError}
+            baseUrl={server.baseUrl}
+            sessionCount={sessions.filter(row => row.serverId === server.id).length}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AddServerForm(props: {
+  hub: SessionHubNamespaceFace | undefined
+  onDone: () => void
+}): JSX.Element {
+  const { hub, onDone } = props
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [probe, setProbe] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const test = async (): Promise<void> => {
     if (hub === undefined || baseUrl.trim() === '') return
@@ -196,8 +201,14 @@ function ServerList(props: {
     setBusy(true)
     try {
       const result = await hub.serversAdd({ name: name.trim(), baseUrl: baseUrl.trim() })
-      if (result.ok) reset()
-      else setProbe(tf('probeFail')(result.error.message))
+      if (result.ok) {
+        setName('')
+        setBaseUrl('')
+        setProbe(null)
+        onDone()
+      } else {
+        setProbe(tf('probeFail')(result.error.message))
+      }
     } catch (e) {
       setProbe(tf('probeFail')(e instanceof Error ? e.message : String(e)))
     } finally {
@@ -205,70 +216,27 @@ function ServerList(props: {
     }
   }
 
-  const className = popup ? 'dsh-hub-popup' : 'dsh-hub-section'
-
   return (
-    <div className={className}>
-      <div className="dsh-hub-section-head">
-        <span className="dsh-hub-section-title">{t('servers')}</span>
-        {live !== 'live' && (
-          <span className="dsh-hub-live-off" title={tf('liveOffHint')()}>{t('liveOff')}</span>
-        )}
-        <button
-          type="button"
-          className="dsh-hub-btn"
-          onClick={() => {
-            if (!adding) {
-              setProbe(null)
-              setAdding(true)
-            } else {
-              setAdding(false)
-            }
-          }}
-        >
-          <IconPlusOutline16 size={14} />
+    <div className="dsh-hub-form">
+      <input className="dsh-hub-input" placeholder={t('name')} value={name}
+        onChange={e => setName(e.target.value)} />
+      <input className="dsh-hub-input" placeholder={t('url')} value={baseUrl}
+        onChange={e => setBaseUrl(e.target.value)} />
+      <div className="dsh-hub-form-actions">
+        <button type="button" className="dsh-hub-btn" disabled={busy || baseUrl.trim() === ''}
+          onClick={() => { void test() }}>
+          {t('test')}
+        </button>
+        <button type="button" className="dsh-hub-btn primary"
+          disabled={busy || name.trim() === '' || baseUrl.trim() === ''}
+          onClick={() => { void add() }}>
+          {t('add')}
+        </button>
+        <button type="button" className="dsh-hub-btn" disabled={busy} onClick={onDone}>
+          {t('cancel')}
         </button>
       </div>
-      {adding && (
-        <div className="dsh-hub-form">
-          <input className="dsh-hub-input" placeholder={t('name')} value={name}
-            onChange={e => setName(e.target.value)} />
-          <input className="dsh-hub-input" placeholder={t('url')} value={baseUrl}
-            onChange={e => setBaseUrl(e.target.value)} />
-          <div className="dsh-hub-form-actions">
-            <button type="button" className="dsh-hub-btn" disabled={busy || baseUrl.trim() === ''}
-              onClick={() => { void test() }}>
-              {t('test')}
-            </button>
-            <button type="button" className="dsh-hub-btn primary" disabled={busy || name.trim() === '' || baseUrl.trim() === ''}
-              onClick={() => { void add() }}>
-              {t('add')}
-            </button>
-            <button type="button" className="dsh-hub-btn" disabled={busy} onClick={() => { reset(); onClose?.() }}>
-              {t('cancel')}
-            </button>
-          </div>
-          {probe !== null && <span className="dsh-hub-muted">{probe}</span>}
-        </div>
-      )}
-      {error !== null && <div className="dsh-hub-error">{tf('actionError')(error)}</div>}
-      <div className="dsh-hub-section-list">
-        {servers.length === 0 && !adding && (
-          <div className="dsh-hub-muted dsh-hub-section-empty">{t('noServers')}</div>
-        )}
-        {servers.map(server => (
-          <ServerRow
-            key={server.id}
-            hub={hub}
-            serverId={server.id}
-            name={server.name}
-            state={server.state}
-            lastError={server.lastError}
-            baseUrl={server.baseUrl}
-            sessionCount={sessions.filter(row => row.serverId === server.id).length}
-          />
-        ))}
-      </div>
+      {probe !== null && <span className="dsh-hub-muted">{probe}</span>}
     </div>
   )
 }
@@ -304,11 +272,15 @@ function ServerRow(props: {
     }
   }
 
+  const stateLabel = STATE_KEY[props.state] ?? 'stateStopped'
+
   return (
     <div className="dsh-hub-server-row">
       <span className={`dsh-hub-dot ${props.state}`} />
       <span className="dsh-hub-server-name" title={props.baseUrl}>{props.name}</span>
-      <span className="dsh-hub-muted">{props.sessionCount}</span>
+      <span className="dsh-hub-muted dsh-hub-server-state">{t(stateLabel)}</span>
+      <span className="dsh-hub-muted dsh-hub-server-url" title={props.baseUrl}>{props.baseUrl}</span>
+      <span className="dsh-hub-muted">{tf('sessionCount')(String(props.sessionCount))}</span>
       {props.state !== 'connected' && props.lastError !== undefined && (
         <span className="dsh-hub-error" title={props.lastError}>!</span>
       )}

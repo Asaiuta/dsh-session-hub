@@ -3,8 +3,8 @@
  * session hub. It mounts the `sessionHub` Remote namespace, relays the hub
  * SSE frame stream into the *official* sessions runtime (so remote sessions
  * appear in the official workspace tree and open in the official
- * conversation pane — no UI replacement), and adds one sidebar footer block
- * for server management.
+ * conversation pane — no UI replacement), and adds one Settings → Plugins
+ * tab for server management.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -15,7 +15,7 @@ import type { SessionHubNamespaceFace } from './face.ts'
 import { SESSION_HUB_REMOTE } from './remote.ts'
 import { NS, en, zh, type HubKey } from './locales.ts'
 import { adoptStyles } from './styles.ts'
-import { ServerSection } from './section.tsx'
+import { SessionHubSettingsTab } from './settings-tab.tsx'
 import { sessionsOf, startOfficialBridge } from './bridge.ts'
 import { ensureHubLive, subscribeFrames, subscribeLiveChanges } from './live.ts'
 import type { HubSnapshot } from '../contract.ts'
@@ -31,8 +31,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
  * official sessions runtime (frames are injected into it). */
 export const inject = ['slots', 'remote', 'locale', 'sessions']
 
+/** Locale pick for slot labels (module-level by browser language). */
+const zhLocale = typeof navigator !== 'undefined'
+  ? navigator.language.toLowerCase().startsWith('zh')
+  : false
+const dict = zhLocale ? zh : en
+function t(key: HubKey): string {
+  const value = dict[key]
+  return typeof value === 'function' ? '' : value
+}
+
 /**
- * Install the bridge + server-management footer block.
+ * Install the bridge + the Settings → Plugins "Session Hub" tab.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
@@ -94,16 +104,20 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'dsh-session-hub: official-sessions bridge')
 
-  // Sidebar footer block: server management (the official tree/conversation
-  // are untouched; remote sessions appear there through /api and the bridge).
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'dsh-session-hub',
+  // Settings → Plugins tab: server connection management (the official tree
+  // and conversation pane are untouched; remote sessions appear there
+  // through /api and the bridge). The Plugins section's tab ledger projects
+  // this registration automatically (id/order/label from slot options).
+  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
+    name: 'settings.plugins.tab',
+    id: 'session-hub',
+    order: 5,
+    label: () => t('settingsTab'),
     locale: NS,
     inject: (): { hub: () => SessionHubNamespaceFace | undefined } => ({
       hub: () => hub,
     }),
-  }, ServerSection))
+  }, SessionHubSettingsTab))
 }
 
 // Type-only re-export used by the fold spec in older docs; kept for the
