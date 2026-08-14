@@ -47,6 +47,14 @@
   `--dsw-alias-button-primary-fill`），并逐个核对令牌确实存在于官方样式表。
   ([#36f27ad](https://github.com/Asaiuta/dsh-session-hub/commit/36f27ad))
 
+- **远端会话跑完了，UI 还在永远转圈。** 官方客户端对两类帧走不同入口：`host/*` 帧同时送给
+  `sessions.handleHostEnvelope` 与 `workspaces.handleHostEnvelope`，mux 帧才走 `handleMuxEnvelope`。
+  旧桥只把 `host/workspace-*` 当 host 帧，**其余全部塞进 mux 入口** —— 而 mux 的 switch 不认识
+  它们，于是静静丢弃。受害者是 `host/session-status`：它正是调用 `handleRunning()`、驱动会话
+  “运行中”指示的那一帧。后果：在 UI 开着的期间结束的远端会话，转圈永不停（刷新页面才正常）。
+  现在按官方语义分流：所有 `host/*` 同时喂两个 runtime，其余走 mux。
+  ([#0273370](https://github.com/Asaiuta/dsh-session-hub/commit/0273370))
+
 ### 变更
 
 - **破坏性：Typert wire 面从 18 个方法收缩到 7 个。** 移除
