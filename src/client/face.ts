@@ -5,7 +5,7 @@
  */
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { HistoryEntry } from '../contract.ts'
-import type { HubSnapshot, ServerId, ServerView } from '../contract.ts'
+import type { HubSnapshot, ImportSourceStatusView, ServerId, ServerView } from '../contract.ts'
 
 export type ProbeOutcome = { ok: true; version: string } | { ok: false; error: string }
 
@@ -36,6 +36,12 @@ export interface SessionHubNamespaceFace {
   modelSync(payload: { serverId?: ServerId }): Promise<RemoteResult<{
     synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }>
   }>>
+  importStatus(payload: Record<string, never>): Promise<RemoteResult<{ sources: ImportSourceStatusView[] }>>
+  importAction(payload: {
+    source: string
+    action: 'import' | 'remove' | 'auto'
+    auto?: boolean
+  }): Promise<RemoteResult<{ sources: ImportSourceStatusView[] }>>
 }
 
 export type { RemoteResult, HistoryEntry }

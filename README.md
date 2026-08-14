@@ -11,6 +11,7 @@
 - **官方侧边栏树零改动**：每台服务器自动成为官方工作区树中的一个分组（虚拟 workspace，`workspace.list` 合并 + 合成 `host/workspace-changed` 帧实时同步），会话点击即打开；树内操作全为原生语义：虚拟组 **+ 新建会话** 在对应服务器上创建、会话菜单 **归档/删除** 路由到所在服务器、**重命名** 虚拟组 = 重命名服务器、**删除** 虚拟组 = 移除该服务器连接（均带官方确认弹窗）；
 - **官方对话区零替换**：远端的会话历史、实时逐 token 流、审批/提问卡片全部由官方组件渲染，插件只做数据桥接；
 - **设置 → 插件 → Session Hub**：服务器连接管理（增删/状态/探活、远端新建会话、模型配置同步）。侧边栏零改动；
+- **外部会话导入（按软件手动开启）**：把本机 Codex CLI / Claude Code / opencode 的历史对话读进官方目录树，按项目目录自动归入对应工作区。默认不读取任何日志——在 设置 → 插件 → Session Hub 里逐个软件点「导入」才生效，可单独开关「自动」跟进新会话。导入会话为只读，点击继续对话时自动转为真实 DSH 会话；
 - **模型配置增量同步**：服务器连上后自动把本机缺失于远端的模型提供方（`llm-*` 命名空间）、默认模型与未配置的 API Key 增量推送到远端——只补缺、不覆盖远端已有配置，密钥走 `credentials.set` 单一出站方向。
 
 全部通过 DSH 自有的 `/api` 协议原生完成——不依赖 SSH、不做屏幕抓取、不改远端任何配置、不在远端装任何插件。
@@ -86,6 +87,20 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 # 3. 点击会话：官方对话区打开——历史加载、实时逐 token 流、审批/提问卡片、发送/取消/重命名
 ```
 
+### 导入本机其他工具的会话（可选）
+
+设置 → 插件 → Session Hub → **外部会话**，按软件点「导入」：
+
+| 软件 | 读取位置 |
+|---|---|
+| Codex CLI | `~/.codex/sessions/**/rollout-*.jsonl` |
+| Claude Code | `~/.claude/projects/**/*.jsonl` |
+| opencode | `~/.local/share/opencode/opencode.db` |
+
+未点「导入」的软件其日志完全不会被读取。导入后勾选「自动」可每 60 秒增量跟进新产生的会话，取消勾选则只在你手动点刷新时更新。「移除」把该软件的会话撤出目录树，不影响其他软件，也不动原始日志。
+
+导入的会话在树中只读；直接向它发消息会自动转成真实 DSH 会话（保留用户/助手对话，原只读副本隐藏）。
+
 直连局域网替代隧道：远端 `dsh web --host 0.0.0.0`（CLI 自动推导 LAN IP 白名单），本地添加 `http://10.0.0.5:3080`。**不要把 3080 暴露到公网**（信任围栏不是认证）。
 
 ## Configuration
@@ -94,7 +109,6 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 |---|---|---|---|
 | `dataFile` | `string?` | `$DSH_HOME/plugins/dsh-session-hub.json` | 服务器注册表持久化位置 |
 | `trustedHosts` | `string[]?` | 仅环回 | 网关拦截的 `/api` 再校验白名单（裸 `host[:port]`，格式同 `client-connection.trustedHosts`；SSH 隧道部署无需配置） |
-| `importers` | `string[]?` | `codex`,`claude`,`opencode` | 外部会话导入源（设为空数组关闭） |
 
 在 profile 的 `cordis.yml` / `cordis.patch.yml` 中配置：
 
@@ -116,7 +130,7 @@ ssh -N -L 127.0.0.1:3333:127.0.0.1:3080 user@10.0.0.5
 **文件访问**：
 - 读/写 `$DSH_HOME/plugins/dsh-session-hub.json`（`0600`，原子写：tmp + rename）；
 - 读/写 `$DSH_HOME/plugins/dsh-session-hub-imports.json`（导入会话解析缓存，`0600`）；
-- 只读扫描本机会话日志：`~/.codex/sessions/**/rollout-*.jsonl`、`~/.claude/projects/**/*.jsonl`、`~/.local/share/opencode/opencode.db`（SQLite 只读打开），用于生成**只读**的导入会话视图；绝不写回这些文件。
+- 只读扫描本机会话日志：`~/.codex/sessions/**/rollout-*.jsonl`、`~/.claude/projects/**/*.jsonl`、`~/.local/share/opencode/opencode.db`（SQLite 只读打开），用于生成**只读**的导入会话视图；绝不写回这些文件。**按软件逐个手动导入**：未在设置里点「导入」的软件，其日志不会被读取。
 
 **网络**：
 - 出站（对每个已配置服务器 `baseUrl`）：HTTP `POST /api/*`（unary RPC）+ WebSocket 升级 `/api/events.mux`、`/api/events.host`；

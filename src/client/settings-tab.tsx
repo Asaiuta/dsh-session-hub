@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { IconPlusOutline16, IconRefreshOutline16, IconTrashOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HubSnapshot, ServerId } from '../contract.ts'
+import type { HubSnapshot, ImportSourceStatusView, ServerId } from '../contract.ts'
 import type { SessionHubNamespaceFace } from './face.ts'
 import { getLiveStatus, subscribeLiveChanges, subscribeLiveStatus } from './live.ts'
 import { en, zh, type HubDict, type HubKey } from './locales.ts'
@@ -97,6 +97,102 @@ const STATE_KEY: Record<string, HubKey> = {
   stopped: 'stateStopped',
 }
 
+/**
+ * Import card: one row per source tool, each imported on request.
+ *
+ * Scanning reads hundreds of log files and adds sessions to everyone's tree,
+ * so it happens only when asked for. Following new logs afterwards is a
+ * separate per-source choice, because wanting a tool's past conversations
+ * does not imply wanting every future one.
+ */
+function ImportCard(props: { hub: SessionHubNamespaceFace | undefined }): JSX.Element {
+  const hub = props.hub
+  const [sources, setSources] = useState<ImportSourceStatusView[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (hub === undefined) return
+    let alive = true
+    void hub.importStatus({}).then(result => {
+      if (alive && result.ok) setSources(result.value.sources)
+    })
+    return () => { alive = false }
+  }, [hub])
+
+  const act = async (
+    source: string,
+    action: 'import' | 'remove' | 'auto',
+    auto?: boolean,
+  ): Promise<void> => {
+    if (hub === undefined || busy !== null) return
+    setBusy(source)
+    setError(null)
+    try {
+      const result = await hub.importAction({ source, action, ...auto === undefined ? {} : { auto } })
+      if (result.ok) setSources(result.value.sources)
+      else setError(result.error.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="dsh-hub-settings-card">
+      <div className="dsh-hub-settings-head">
+        <span className="dsh-hub-settings-head-title">{t('imports')}</span>
+      </div>
+      <p className="dsh-hub-settings-sub">{t('importsIntro')}</p>
+      {error !== null && <div className="dsh-hub-error">{tf('actionError')(error)}</div>}
+      {sources.map(s => (
+        <div key={s.source} className="dsh-hub-import-row">
+          <div className="dsh-hub-import-main">
+            <span className="dsh-hub-import-name">{t(`tool_${s.source}` as HubKey)}</span>
+            {s.imported
+              ? <span className="dsh-hub-import-count">{tf('sessionCount')(String(s.count))}</span>
+              : <span className="dsh-hub-muted">{s.available ? t('notImported') : t('notInstalled')}</span>}
+            <span className="dsh-hub-import-path" title={s.path}>{s.path}</span>
+          </div>
+          <div className="dsh-hub-import-actions">
+            {s.imported && (
+              <label className="dsh-hub-import-auto" title={t('autoScanHint')}>
+                <input
+                  type="checkbox"
+                  checked={s.auto}
+                  disabled={busy !== null}
+                  onChange={e => void act(s.source, 'auto', e.currentTarget.checked)}
+                />
+                {t('autoScan')}
+              </label>
+            )}
+            <button
+              type="button"
+              className="dsh-hub-btn"
+              disabled={busy !== null || (!s.imported && !s.available)}
+              onClick={() => void act(s.source, s.imported ? 'remove' : 'import', true)}
+            >
+              {busy === s.source
+                ? t('importing')
+                : s.imported ? t('removeImport') : t('doImport')}
+            </button>
+            {s.imported && (
+              <button
+                type="button"
+                className="dsh-hub-btn"
+                disabled={busy !== null}
+                title={t('rescanHint')}
+                onClick={() => void act(s.source, 'import', s.auto)}
+              >
+                <IconRefreshOutline16 size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** The "Session Hub" tab inside Settings → Plugins. */
 export function SessionHubSettingsTab(props: {
   hub: () => SessionHubNamespaceFace | undefined
@@ -161,6 +257,8 @@ export function SessionHubSettingsTab(props: {
         <p className="dsh-hub-settings-sub">{t('modelSyncIntro')}</p>
         {syncResult !== null && <p className="dsh-hub-settings-result">{syncResult}</p>}
       </div>
+
+      <ImportCard hub={hub} />
 
       <div className="dsh-hub-settings-card">
         <div className="dsh-hub-settings-head">

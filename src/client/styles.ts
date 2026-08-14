@@ -170,6 +170,48 @@ const CSS = `
   line-height: 1.5;
   color: var(--dsw-alias-label-primary, #e8e9ed);
 }
+
+.dsh-hub-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--dsw-alias-border-l2, #2a2e37);
+}
+.dsh-hub-import-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.dsh-hub-import-name { font-weight: 500; }
+.dsh-hub-import-count {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9aa0ab);
+}
+.dsh-hub-import-path {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.dsh-hub-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.dsh-hub-import-auto {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9aa0ab);
+  cursor: pointer;
+}
 `
 
 let injected = false

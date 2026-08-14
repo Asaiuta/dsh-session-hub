@@ -227,6 +227,43 @@ const modelSyncResultSchema = z.object({
   synced: z.array(modelSyncEntrySchema),
 }).passthrough()
 
+/** One external source tool as the settings tab presents it. */
+export interface ImportSourceStatusView {
+  source: string
+  path: string
+  available: boolean
+  imported: boolean
+  auto: boolean
+  count: number
+  scannedAt?: number
+}
+
+const importStatusEntrySchema = z.object({
+  source: z.string(),
+  path: z.string(),
+  available: z.boolean(),
+  imported: z.boolean(),
+  auto: z.boolean(),
+  count: z.number(),
+  scannedAt: z.number().optional(),
+}).passthrough()
+
+const importStatusResultSchema = z.object({
+  sources: z.array(importStatusEntrySchema),
+}).passthrough()
+
+const emptyPayloadSchema = z.object({}).passthrough()
+
+/**
+ * Import action: `import` reads the source's logs (and sets whether its new
+ * ones are followed), `remove` drops them, `auto` only toggles following.
+ */
+const importActionPayloadSchema = z.object({
+  source: z.string().min(1),
+  action: z.enum(['import', 'remove', 'auto']),
+  auto: z.boolean().optional(),
+}).passthrough()
+
 const sessionSelectModelPayloadSchema = z.object({
   serverId: serverIdSchema,
   sessionId: z.string().min(1),
@@ -322,6 +359,8 @@ export const SESSION_HUB_INVOCATIONS: readonly InvocationDescriptor[] = [
   descriptor('sessionSelectModel', sessionSelectModelPayloadSchema, 'dsh-session-hub#SessionSelectModelPayload', selectModelResultSchema, 'dsh-session-hub#SelectModelResult'),
   descriptor('respond', respondPayloadSchema, 'dsh-session-hub#RespondPayload', acceptedResultSchema, 'dsh-session-hub#AcceptedResult'),
   descriptor('modelSync', modelSyncPayloadSchema, 'dsh-session-hub#ModelSyncPayload', modelSyncResultSchema, 'dsh-session-hub#ModelSyncResult'),
+  descriptor('importStatus', emptyPayloadSchema, 'dsh-session-hub#EmptyPayload', importStatusResultSchema, 'dsh-session-hub#ImportStatusResult'),
+  descriptor('importAction', importActionPayloadSchema, 'dsh-session-hub#ImportActionPayload', importStatusResultSchema, 'dsh-session-hub#ImportStatusResult'),
   descriptor('serversProbe', probePayloadSchema, 'dsh-session-hub#ProbePayload', probeResultSchema, 'dsh-session-hub#ProbeResult'),
 ]
 

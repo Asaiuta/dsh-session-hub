@@ -8,10 +8,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { HistoryEntry, SessionModels, SessionSummary } from '@deepseek-ai/dsh-host-apiproxy'
-import type { HubSnapshot, PendingRow, ServerId, ServerView } from './contract.ts'
+import type { HubSnapshot, ImportSourceStatusView, PendingRow, ServerId, ServerView } from './contract.ts'
 import { ServerRegistry } from './hub/registry.ts'
 import type { ActionResult } from './hub/server-link.ts'
 import type { ModelSyncService } from './hub/model-sync.ts'
+import { IMPORT_SOURCES, type ImportSource, type ImportStore } from './hub/importer.ts'
 
 /** Throw an RPC-style error the Typert layer maps into the error result slot. */
 function fail(code: string, message: string): never {
@@ -62,8 +63,42 @@ export class SessionHubRuntime extends TypertRemoteService {
     ctx: Context,
     private readonly registry: ServerRegistry,
     private readonly syncService?: ModelSyncService,
+    private readonly imports?: ImportStore,
   ) {
     super(ctx, 'sessionHub')
+  }
+
+  // ---- External-session import ----
+
+  /** Per-source import state for the settings tab. */
+  @Remote
+  importStatus(_payload: Record<string, never>): { sources: ImportSourceStatusView[] } {
+    if (this.imports === undefined) fail('not-configured', 'importer unavailable')
+    return out({ sources: this.imports.sourceStatus() })
+  }
+
+  /**
+   * Import, remove or re-configure one source tool, answering with the
+   * refreshed state so the caller never has to guess what took effect.
+   *
+   * A scan runs only for `import`: reading hundreds of logs is the user's
+   * explicit request, not a side effect of toggling a checkbox.
+   */
+  @Remote
+  async importAction(payload: {
+    source: string
+    action: 'import' | 'remove' | 'auto'
+    auto?: boolean
+  }): Promise<{ sources: ImportSourceStatusView[] }> {
+    if (this.imports === undefined) fail('not-configured', 'importer unavailable')
+    if (!IMPORT_SOURCES.includes(payload.source as ImportSource)) {
+      fail('unknown-source', `unknown import source: ${payload.source}`)
+    }
+    const source = payload.source as ImportSource
+    if (payload.action === 'import') await this.imports.importSource(source, payload.auto ?? true)
+    else if (payload.action === 'remove') await this.imports.removeSource(source)
+    else await this.imports.setAuto(source, payload.auto ?? false)
+    return out({ sources: this.imports.sourceStatus() })
   }
 
   // ---- Model-config sync ----

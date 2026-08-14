@@ -11,7 +11,7 @@
  * Sessions are additive and never written back into any tool's logs.
  */
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { statSync } from 'node:fs'
+import { statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import type { SessionSummary } from '@deepseek-ai/dsh-host-apiproxy'
@@ -58,6 +58,33 @@ export function groupingPath(cwd: string): { normalized: string; display: string
 
 export type ImportSource = 'codex' | 'claude' | 'opencode'
 
+export const IMPORT_SOURCES: readonly ImportSource[] = ['codex', 'claude', 'opencode']
+
+/** What the settings tab shows and acts on, per source tool. */
+export interface ImportSourceStatus {
+  source: ImportSource
+  /** The log location this source reads. */
+  path: string
+  /** Whether that location exists on this machine. */
+  available: boolean
+  /** Imported at least once (the user opted this source in). */
+  imported: boolean
+  /** Follow newly written logs for this source in the background. */
+  auto: boolean
+  /** Sessions currently held for this source. */
+  count: number
+  /** Epoch ms of the last completed scan, if any. */
+  scannedAt?: number
+}
+
+/** Where each source tool keeps its logs on this machine. */
+export function sourcePath(source: ImportSource): string {
+  const home = homedir()
+  if (source === 'codex') return join(home, '.codex', 'sessions')
+  if (source === 'claude') return join(home, '.claude', 'projects')
+  return join(home, '.local', 'share', 'opencode', 'opencode.db')
+}
+
 interface CacheFile {
   files: Record<string, number>
   sessions: ImportedSession[]
@@ -73,6 +100,12 @@ interface CacheFile {
    * not also shown as an imported one.
    */
   promoted?: Record<string, string>
+  /**
+   * Per-source opt-in. Importing is a deliberate act, so a source appears in
+   * the tree only once the user asked for it, and `auto` decides whether its
+   * newly written logs are followed afterwards.
+   */
+  sources?: Record<string, { imported?: boolean; auto?: boolean; scannedAt?: number }>
 }
 
 interface HistoryEvent {
@@ -281,8 +314,17 @@ export class ImportStore {
     this.cache = { files: {}, sessions: [] }
   }
 
-  /** Load persisted cache + scan every enabled source (incremental). */
-  async load(enabled: ImportSource[]): Promise<void> {
+  /**
+   * Restore the persisted cache. Scanning is deliberately not part of load:
+   * importing is a user decision, so nothing is read from the source tools
+   * until a source is imported (or its auto-follow is on, which the caller
+   * drives through {@link autoSources}).
+   *
+   * A cache written before per-source opt-in existed holds sessions but no
+   * source records; those sources are adopted as already-imported so an
+   * upgrade does not empty the tree.
+   */
+  async load(): Promise<void> {
     let restored = 0
     try {
       const raw = await readFile(this.cachePath, 'utf8')
@@ -296,11 +338,97 @@ export class ImportStore {
       // survive restarts or deleted workspaces reappear on the next boot.
       if (Array.isArray(parsed.declined)) this.cache.declined = parsed.declined
       if (parsed.promoted && typeof parsed.promoted === 'object') this.cache.promoted = parsed.promoted
+      if (parsed.sources && typeof parsed.sources === 'object') this.cache.sources = parsed.sources
     } catch (error) {
       console.warn(`[dsh-session-hub] import cache read failed (${this.cachePath}):`, error)
     }
-    await this.rescan(enabled)
+    this.adoptLegacyCache()
+    this.rebuildIndex()
     console.info(`[dsh-session-hub] import cache restored ${restored}, total ${this.sessions.size}`)
+  }
+
+  /**
+   * Treat sources already present in a pre-opt-in cache as imported.
+   *
+   * Without this an upgrade would silently hide sessions the user has been
+   * seeing all along, since a cache from an older version records no consent.
+   */
+  private adoptLegacyCache(): void {
+    if (this.cache.sources !== undefined) return
+    this.cache.sources = {}
+    for (const source of IMPORT_SOURCES) {
+      if (this.cache.sessions.some(s => s.tool === source)) {
+        this.cache.sources[source] = { imported: true, auto: true }
+      }
+    }
+    void this.persist()
+  }
+
+  /** Per-source state as the settings tab presents it. */
+  sourceStatus(): ImportSourceStatus[] {
+    const counts = new Map<string, number>()
+    for (const s of this.cache.sessions) counts.set(s.tool, (counts.get(s.tool) ?? 0) + 1)
+    return IMPORT_SOURCES.map(source => {
+      const record = this.cache.sources?.[source]
+      const path = sourcePath(source)
+      return {
+        source,
+        path,
+        available: existsSync(path),
+        imported: record?.imported === true,
+        auto: record?.auto === true,
+        count: counts.get(source) ?? 0,
+        ...record?.scannedAt !== undefined ? { scannedAt: record.scannedAt } : {},
+      }
+    })
+  }
+
+  /** Sources whose newly written logs should be followed in the background. */
+  autoSources(): ImportSource[] {
+    return IMPORT_SOURCES.filter(s => {
+      const record = this.cache.sources?.[s]
+      return record?.imported === true && record.auto === true
+    })
+  }
+
+  /**
+   * Import one source on request: marks it imported and scans it.
+   *
+   * @param source - the tool to read.
+   * @param auto - whether to follow its new logs afterwards.
+   * @returns how many sessions that source now holds.
+   */
+  async importSource(source: ImportSource, auto: boolean): Promise<number> {
+    this.cache.sources ??= {}
+    this.cache.sources[source] = { imported: true, auto }
+    await this.rescan([source])
+    return this.cache.sessions.filter(s => s.tool === source).length
+  }
+
+  /**
+   * Drop one source: its sessions leave the tree and its opt-in is revoked.
+   *
+   * File mtimes for the source are cleared too, so a later re-import re-reads
+   * the logs from scratch rather than trusting stale marks.
+   */
+  async removeSource(source: ImportSource): Promise<void> {
+    this.cache.sessions = this.cache.sessions.filter(s => s.tool !== source)
+    const prefix = sourcePath(source)
+    for (const file of Object.keys(this.cache.files)) {
+      if (normalizePath(file).startsWith(normalizePath(prefix))) delete this.cache.files[file]
+    }
+    this.cache.sources ??= {}
+    this.cache.sources[source] = { imported: false, auto: false }
+    this.rebuildIndex()
+    await this.persist()
+  }
+
+  /** Turn background following on or off for an already-imported source. */
+  async setAuto(source: ImportSource, auto: boolean): Promise<void> {
+    const record = this.cache.sources?.[source]
+    if (record?.imported !== true) return
+    record.auto = auto
+    await this.persist()
   }
 
   /** Re-scan changed/new files (cheap when nothing changed). */
@@ -321,20 +449,19 @@ export class ImportStore {
   }
 
   private async runScan(enabled: ImportSource[]): Promise<void> {
-    const home = homedir()
-    const codexRoot = join(home, '.codex', 'sessions')
-    const claudeRoot = join(home, '.claude', 'projects')
-    const opencodeDb = join(home, '.local', 'share', 'opencode', 'opencode.db')
     const jsonlRoots = new Set<string>()
     if (enabled.includes('codex')) {
+      const codexRoot = sourcePath('codex')
       for (const file of await walkFiles(codexRoot, '.jsonl')) jsonlRoots.add(file)
       await scanJsonl(codexRoot, '.jsonl', parseCodexRollout, this.cache)
     }
     if (enabled.includes('claude')) {
+      const claudeRoot = sourcePath('claude')
       for (const file of await walkFiles(claudeRoot, '.jsonl')) jsonlRoots.add(file)
       await scanJsonl(claudeRoot, '.jsonl', parseClaudeProject, this.cache)
     }
     if (enabled.includes('opencode')) {
+      const opencodeDb = sourcePath('opencode')
       try {
         const mtime = (await stat(opencodeDb)).mtimeMs
         if (this.cache.files[opencodeDb] !== mtime) {
@@ -356,9 +483,19 @@ export class ImportStore {
         // No opencode install — skip.
       }
     }
-    // Drop sessions whose JSONL source file disappeared (opencode sessions
-    // are db-backed and keep no sourceFile).
-    this.cache.sessions = this.cache.sessions.filter(s => s.sourceFile === undefined || jsonlRoots.has(s.sourceFile))
+    // Drop sessions whose JSONL source file disappeared. Only sources just
+    // scanned are judged: another source's files were never enumerated here,
+    // so treating them as missing would delete sessions that are perfectly
+    // fine (opencode sessions are db-backed and keep no sourceFile).
+    this.cache.sessions = this.cache.sessions.filter(s =>
+      s.sourceFile === undefined || !enabled.includes(s.tool as ImportSource) || jsonlRoots.has(s.sourceFile))
+    const now = Date.now()
+    this.cache.sources ??= {}
+    for (const source of enabled) {
+      const record = this.cache.sources[source] ?? { imported: true }
+      record.scannedAt = now
+      this.cache.sources[source] = record
+    }
     this.rebuildIndex()
     this.persist()
   }

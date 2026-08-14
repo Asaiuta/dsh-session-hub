@@ -38,6 +38,8 @@ export const TYPERT_MANIFEST: TypertContribution = {
           { kind: 'method', name: 'sessionSelectModel', signature: 'sessionSelectModel(payload: { serverId: ServerId; sessionId: string; provider: string; model: string; reasoningEffort?: string }): { selected: ModelSelection }' },
           { kind: 'method', name: 'respond', signature: 'respond(payload: { serverId: ServerId; rpcId: string; value: unknown }): { accepted: true }' },
           { kind: 'method', name: 'modelSync', signature: 'modelSync(payload: { serverId?: ServerId }): { synced: Array<{ serverId: string; updated: string[]; credentials: string[]; skipped: string[] }> }' },
+          { kind: 'method', name: 'importStatus', signature: 'importStatus(payload: Record<string, never>): { sources: ImportSourceStatusView[] }' },
+          { kind: 'method', name: 'importAction', signature: 'importAction(payload: { source: string; action: string; auto?: boolean }): { sources: ImportSourceStatusView[] }' },
         ],
         types: [],
       },
