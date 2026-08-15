@@ -5,6 +5,47 @@
 
 > Alpha 阶段：`0.1.0-alpha.*` 之间允许破坏性变更，破坏点会在下方逐条写明。
 
+## [0.1.0-alpha.3] - 2026-08-15
+
+这一版收掉了「外部会话实时流式进 DSH」整块功能，同时让导入的只读会话
+真正可用：能看完整的工具调用卡片、能直接发消息转正，侧边栏也不再需要
+重连才出现新会话。
+
+### 移除（破坏性）
+
+- **外部会话不再实时流式、不再显示「运行中」状态。** `fs.watch` 实时文件监听
+  （`264f9c7` 引入）整体回滚；早先的 live push（`a1c3199` 等）也已回滚。
+  导入的会话是静态历史视图：内容在导入/扫描时读取，列表里没有运行中标记，
+  打开着的对话不会自己滚动。自动导入（勾选 **Auto** + 60 秒周期扫描）保留，
+  新内容在刷新后出现。影响范围：依赖实时尾巴的脚本；正常浏览不受影响。
+  ([#6130450](https://github.com/Asaiuta/dsh-session-hub/commit/6130450))
+
+### 新增
+
+- **只读会话显示真实工具调用卡片。** 四个解析器现在从源日志提取结构化工具数据：
+  Codex 的 `function_call`/`function_call_output` 按 `call_id` 配对、Claude 的
+  `tool_use`/`tool_result` 按 `tool_use_id` 回填、opencode 的 tool part、Pi 的
+  `toolCall` 块。历史视图按官方 `tool/call` + `tool/result` 事件渲染成原生卡片
+  （名称、JSON 参数、结果、错误标记），全部取自原始记录、不合成；
+  每轮最多 12 个调用、单载荷 4KB 截断。转正（promote）时同一批事件进入真实会话，
+  模型上下文也能读到这些工具结果。
+  ([#82c666a](https://github.com/Asaiuta/dsh-session-hub/commit/82c666a))
+- **手动导入后侧边栏实时刷新。** 官方树只在连接时拉一次 `workspace.list`，
+  网关现在记住自己改过的视图（虚拟服务器组、孤儿项目组、追加了导入行的
+  官方工作区），1.5 秒差异帧把变化推给官方客户端；新会话同时以
+  `host/session-added` + title 投影帧进官方会话库，行标题即时正确。
+  移除软件、转正隐藏原会话也会实时反映。
+  ([#68b8a66](https://github.com/Asaiuta/dsh-session-hub/commit/68b8a66))
+
+### 修复
+
+- **导入会话永远发不出消息（promote 触发不了）。** 官方 UI 打开会话先拉
+  `session.models`，网关此前对导入会话一律回 `import-readonly` → 模型不显示、
+  输入框禁用。现在用本机模型目录合成合法响应（`groups`/`failures` 取自
+  `llm.models`，`current` 取第一个可用模型，`routable` 有模型即为真），
+  发送按钮放行，点发送即转正。
+  ([#1449304](https://github.com/Asaiuta/dsh-session-hub/commit/1449304))
+
 ## [0.1.0-alpha.2] - 2026-08-14
 
 这一版把「用户得自己开隧道」这件事收进插件，并让四个功能可以分开安装。
@@ -111,5 +152,6 @@ dsh plugin --profile web add dsh-session-hub@alpha
 - **模型配置增量同步**：把本机有而远端缺的提供方、默认模型与 API Key 补到已连服务器，只补缺不覆盖。
 - **自环检测**：拒绝把 hub 指向自己（通过本进程 `/hub/events` token + `text/event-stream` 双重判定）。
 
+[0.1.0-alpha.3]: https://github.com/Asaiuta/dsh-session-hub/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/Asaiuta/dsh-session-hub/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/Asaiuta/dsh-session-hub/releases/tag/v0.1.0-alpha.1
