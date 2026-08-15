@@ -1,4 +1,20 @@
 export type ImportTool = 'codex' | 'claude' | 'opencode' | 'pi';
+/**
+ * One tool call recorded by the source tool, structured so the read-only
+ * view can render it as a real DSH tool card (and promotion can carry it
+ * into the real session verbatim).
+ */
+export interface ImportedToolCall {
+    /** The source tool's call id (codex call_id / claude tool_use_id / …). */
+    id: string;
+    name: string;
+    /** Raw arguments as the source recorded them (JSON string when structured). */
+    arguments: string;
+    /** Text form of the result, when the source recorded one. */
+    result?: string;
+    /** The source flagged the result as an error. */
+    error?: boolean;
+}
 export interface ImportedTurn {
     role: 'user' | 'assistant';
     text: string;
@@ -9,6 +25,8 @@ export interface ImportedTurn {
      * not as conversation text.
      */
     aborted?: boolean;
+    /** Tool calls this assistant turn made, in source order. */
+    tools?: ImportedToolCall[];
 }
 export interface ImportedSession {
     /** Source tool. */
@@ -33,8 +51,8 @@ export declare const MAX_TURN_CHARS = 40000;
 export declare function importSessionId(tool: ImportTool, key: string): string;
 /** Normalize a path for workspace matching (case + separator folding). */
 export declare function normalizePath(path: string): string;
-/** Truncate a turn's text to the per-turn cap. */
-export declare function capText(text: string): string;
+/** Truncate a turn's text to the per-turn cap (or an explicit tool cap). */
+export declare function capText(text: string, max?: number): string;
 /** One turn's conversation text separated from the control records around it. */
 export interface CleanedTurn {
     /** The text a model should actually read; empty when the turn was pure control. */

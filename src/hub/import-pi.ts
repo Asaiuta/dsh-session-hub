@@ -17,45 +17,69 @@
 import { readFile } from 'node:fs/promises'
 import {
   capText, deriveTitle, importSessionId,
-  type ImportedSession, type ImportedTurn, type ImportTool,
+  type ImportedSession, type ImportedToolCall, type ImportedTurn, type ImportTool,
 } from './import-common.ts'
+
+/** Tool calls a single assistant turn may carry; the rest are dropped. */
+const MAX_TOOLS_PER_TURN = 12
 
 /** Content block as written by Pi (superset of the plain text case). */
 interface PiBlock {
   type?: string
   text?: string
   name?: string
+  id?: string
+  arguments?: unknown
   input?: unknown
   content?: unknown
 }
 
 /**
- * Flatten one message's content blocks into plain text.
+ * Flatten one message's content blocks into plain text + structured tool
+ * calls. Tool calls render as real DSH tool cards instead of folded text.
+ *
  * @param content - the `message.content` value, string or block array.
  * @param max - cap for a single serialized tool payload.
- * @returns the flattened text, empty when nothing usable was present.
+ * @returns the flattened text and the tool calls, empty when nothing usable.
  */
-function piText(content: unknown, max: number): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  const parts: string[] = []
-  for (const block of content) {
-    const b = block as PiBlock
-    if (typeof b.text === 'string' && (b.type === 'text' || b.type === undefined)) {
-      parts.push(b.text)
-      continue
-    }
-    if (b.type === 'toolUse' || b.type === 'tool_use') {
-      const input = typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}).slice(0, max)
-      parts.push(`[tool ${b.name ?? 'tool'}] ${input}`)
-      continue
-    }
-    if (b.type === 'toolResult' || b.type === 'tool_result') {
-      const body = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '').slice(0, max)
-      parts.push(`[result] ${body}`)
+function piContent(content: unknown, max: number): { text: string; tools: ImportedToolCall[] } {
+  if (typeof content === 'string') return { text: content, tools: [] }
+  const text: string[] = []
+  const tools: ImportedToolCall[] = []
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      const b = block as PiBlock
+      if (typeof b.text === 'string' && (b.type === 'text' || b.type === undefined)) {
+        text.push(b.text)
+        continue
+      }
+      if (b.type === 'toolCall' && typeof b.id === 'string' && typeof b.name === 'string') {
+        if (tools.length < MAX_TOOLS_PER_TURN) {
+          const input = typeof b.arguments === 'string' ? b.arguments : JSON.stringify(b.arguments ?? {}, null, 2)
+          tools.push({ id: b.id, name: b.name, arguments: capText(input, max) })
+        }
+        continue
+      }
+      if (b.type === 'toolUse' || b.type === 'tool_use') {
+        const id = typeof b.id === 'string' ? b.id : `pi-${tools.length}`
+        if (tools.length < MAX_TOOLS_PER_TURN) {
+          const input = typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}, null, 2)
+          tools.push({ id, name: b.name ?? 'tool', arguments: capText(input, max) })
+        }
+        continue
+      }
+      if (b.type === 'toolResult' || b.type === 'tool_result') {
+        const body = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '').slice(0, max)
+        // Results ride their own blocks here; attach to the last call when
+        // they carry no id.
+        const last = tools[tools.length - 1]
+        if (last !== undefined && last.result === undefined) {
+          last.result = capText(body, max)
+        }
+      }
     }
   }
-  return parts.join('\n')
+  return { text: text.join('\n'), tools }
 }
 
 /**
@@ -108,10 +132,16 @@ export async function parsePiSession(file: string): Promise<ImportedSession | nu
       ? parsed
       : typeof inner === 'number' && Number.isFinite(inner) ? inner : Date.now()
 
-    const body = piText(row.message?.content, 4000)
-    if (body.trim() === '') continue
+    const { text: body, tools } = piContent(row.message?.content, 4000)
+    if (body.trim() === '' && tools.length === 0) continue
     if (role === 'user' && firstUser === '') firstUser = body
-    turns.push({ role, text: capText(body), time })
+    const turn: ImportedTurn = { role, text: capText(body), time }
+    if (role === 'assistant' && tools.length > 0) {
+      // Only assistant turns render tool cards; a user-role tool block
+      // (defensive) contributes its call without card attribution.
+      turn.tools = tools
+    }
+    turns.push(turn)
   }
 
   if (key === '') {

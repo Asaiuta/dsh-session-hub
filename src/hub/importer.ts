@@ -61,6 +61,12 @@ export type ImportSource = 'codex' | 'claude' | 'opencode' | 'pi'
 
 export const IMPORT_SOURCES: readonly ImportSource[] = ['codex', 'claude', 'opencode', 'pi']
 
+/**
+ * Cache schema version: bump when the parsed session shape changes so old
+ * caches re-parse their sources instead of pinning stale mtimes.
+ */
+const CACHE_VERSION = 2
+
 /** What the settings tab shows and acts on, per source tool. */
 export interface ImportSourceStatus {
   source: ImportSource
@@ -88,6 +94,8 @@ export function sourcePath(source: ImportSource): string {
 }
 
 interface CacheFile {
+  /** Bumped whenever the parsed shape changes; older caches are re-parsed. */
+  version?: number
   files: Record<string, number>
   sessions: ImportedSession[]
   /**
@@ -228,30 +236,68 @@ function buildHistory(s: ImportedSession): HistoryEvent[] {
     } else {
       turn += 1
       const step = 1
-      events.push({
-        seq, event: {
-          type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
-          data: { turn, step, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
-        },
-      })
-      seq += 1
-      const deltas = splitDeltas(t.text, 4000)
-      for (const text of deltas) {
+      // A turn that only carried tool calls renders cards without an empty
+      // text block above them.
+      if (t.text.trim() !== '') {
         events.push({
           seq, event: {
             type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
-            data: { turn, step, chunk: { type: 'text-delta', index: 0, text } },
+            data: { turn, step, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+          },
+        })
+        seq += 1
+        const deltas = splitDeltas(t.text, 4000)
+        for (const text of deltas) {
+          events.push({
+            seq, event: {
+              type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
+              data: { turn, step, chunk: { type: 'text-delta', index: 0, text } },
+            },
+          })
+          seq += 1
+        }
+        events.push({
+          seq, event: {
+            type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
+            data: { turn, step, chunk: { type: 'block-end', index: 0, block: { type: 'text', text: t.text } } },
           },
         })
         seq += 1
       }
-      events.push({
-        seq, event: {
-          type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
-          data: { turn, step, chunk: { type: 'block-end', index: 0, block: { type: 'text', text: t.text } } },
-        },
-      })
-      seq += 1
+      // Tool calls render as real cards: tool/call opens the card, tool/result
+      // (append surface op) fills it with the recorded output. Events without
+      // a recorded result stay as an open card.
+      for (const tool of t.tools ?? []) {
+        events.push({
+          seq, event: {
+            type: 'tool/call', seq, time: t.time, surfaceOp: 'append',
+            data: { turn, step, callId: tool.id, name: tool.name, arguments: tool.arguments },
+          },
+        })
+        seq += 1
+        if (tool.result !== undefined) {
+          events.push({
+            seq, event: {
+              type: 'tool/result', seq, time: t.time, surfaceOp: 'append',
+              data: {
+                turn, step,
+                message: {
+                  id: `imp-${s.key}-${seq}`,
+                  role: 'user',
+                  source: { kind: 'tool', callId: tool.id },
+                  content: [{
+                    type: 'tool-result',
+                    toolCallId: tool.id,
+                    content: [{ type: 'text', text: tool.result }],
+                    isError: tool.error === true,
+                  }],
+                },
+              },
+            },
+          })
+          seq += 1
+        }
+      }
       events.push({
         seq, event: {
           type: 'assistant/chunk', seq, time: t.time, surfaceOp: 'append',
@@ -336,6 +382,10 @@ export class ImportStore {
         restored = parsed.sessions.length
       }
       if (parsed.files && typeof parsed.files === 'object') this.cache.files = parsed.files
+      // A cache written by an older parser shape (no structured tool calls)
+      // must not pin mtimes: drop the file marks so the next scan re-parses
+      // everything and picks up the new fields.
+      if (parsed.version !== CACHE_VERSION) this.cache.files = {}
       // The declined list is a user decision, not scan output: it must
       // survive restarts or deleted workspaces reappear on the next boot.
       if (Array.isArray(parsed.declined)) this.cache.declined = parsed.declined
@@ -536,7 +586,7 @@ export class ImportStore {
 
   /** Persist the parsed cache (deferred debounce handled by caller). */
   async persist(): Promise<void> {
-    const raw = JSON.stringify(this.cache)
+    const raw = JSON.stringify({ ...this.cache, version: CACHE_VERSION })
     try {
       const { dirname } = await import('node:path')
       const { mkdir, rm, rename, writeFile } = await import('node:fs/promises')

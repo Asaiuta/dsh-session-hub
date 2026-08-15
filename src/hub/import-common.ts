@@ -8,6 +8,23 @@ import { createHash } from 'node:crypto'
 
 export type ImportTool = 'codex' | 'claude' | 'opencode' | 'pi'
 
+/**
+ * One tool call recorded by the source tool, structured so the read-only
+ * view can render it as a real DSH tool card (and promotion can carry it
+ * into the real session verbatim).
+ */
+export interface ImportedToolCall {
+  /** The source tool's call id (codex call_id / claude tool_use_id / …). */
+  id: string
+  name: string
+  /** Raw arguments as the source recorded them (JSON string when structured). */
+  arguments: string
+  /** Text form of the result, when the source recorded one. */
+  result?: string
+  /** The source flagged the result as an error. */
+  error?: boolean
+}
+
 export interface ImportedTurn {
   role: 'user' | 'assistant'
   text: string
@@ -18,6 +35,8 @@ export interface ImportedTurn {
    * not as conversation text.
    */
   aborted?: boolean
+  /** Tool calls this assistant turn made, in source order. */
+  tools?: ImportedToolCall[]
 }
 
 export interface ImportedSession {
@@ -52,9 +71,9 @@ export function normalizePath(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
-/** Truncate a turn's text to the per-turn cap. */
-export function capText(text: string): string {
-  return text.length > MAX_TURN_CHARS ? `${text.slice(0, MAX_TURN_CHARS)}\n…(truncated)` : text
+/** Truncate a turn's text to the per-turn cap (or an explicit tool cap). */
+export function capText(text: string, max = MAX_TURN_CHARS): string {
+  return text.length > max ? `${text.slice(0, max)}\n…(truncated)` : text
 }
 
 /**

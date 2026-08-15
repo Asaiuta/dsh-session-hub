@@ -14,12 +14,13 @@
  * the harness validates and persists every event as usual, so the result is
  * indistinguishable from a natively created session and outlives this plugin.
  *
- * Only conversation is carried across. Turns become `user/message` and
- * `assistant/message` surface events — the two the model actually reads — and
- * tool activity stays folded into the assistant text as the importers
- * rendered it. Synthesizing `tool/call`/`tool/result` pairs would mean
- * inventing DSH call ids and argument schemas for tools belonging to another
- * product, producing history the harness cannot act on.
+ * Only conversation is carried across, plus the tool calls the source
+ * recorded. Turns become `user/message` and `assistant/message` surface
+ * events — the two the model actually reads — and each recorded tool call
+ * becomes a `tool/call` + `tool/result` pair with its real call id, name,
+ * arguments and output, so the promoted history renders the same cards the
+ * read-only view showed. Nothing is invented: calls with no recorded result
+ * stay open, and tool activity that the importer never parsed is absent.
  */
 import type { ImportedSession } from './import-common.ts'
 
@@ -61,9 +62,11 @@ export function replayInto(
   let turn = 0
   for (const parsed of session.turns) {
     const text = parsed.text.trim()
-    if (text === '') continue
+    const tools = parsed.tools ?? []
+    if (text === '' && tools.length === 0) continue
     const id = `imp-${session.key}-${appended}`
     if (parsed.role === 'user') {
+      if (text === '') continue
       live.append('user/message', {
         id,
         role: 'user',
@@ -72,16 +75,47 @@ export function replayInto(
       }, { surfaceOp: 'append' })
     } else {
       turn += 1
-      live.append('assistant/message', {
-        turn,
-        step: 1,
-        message: {
-          id,
-          role: 'assistant',
-          content: [{ type: 'text', text }],
-          source: provenanceFor(session.tool),
-        },
-      }, { surfaceOp: 'append' })
+      if (text !== '') {
+        live.append('assistant/message', {
+          turn,
+          step: 1,
+          message: {
+            id,
+            role: 'assistant',
+            content: [{ type: 'text', text }],
+            source: provenanceFor(session.tool),
+          },
+        }, { surfaceOp: 'append' })
+      }
+      // The recorded tool calls ride along as real call/result pairs: the
+      // official conversation fold renders them as cards, and the model sees
+      // them as user-role tool results when it derives the next request.
+      for (const tool of parsed.tools ?? []) {
+        live.append('tool/call', {
+          turn,
+          step: 1,
+          callId: tool.id,
+          name: tool.name,
+          arguments: tool.arguments,
+        }, { surfaceOp: 'append' })
+        if (tool.result !== undefined) {
+          live.append('tool/result', {
+            turn,
+            step: 1,
+            message: {
+              id: `imp-${session.key}-${appended}-${tool.id}`,
+              role: 'user',
+              source: { kind: 'tool', callId: tool.id },
+              content: [{
+                type: 'tool-result',
+                toolCallId: tool.id,
+                content: [{ type: 'text', text: tool.result }],
+                isError: tool.error === true,
+              }],
+            },
+          }, { surfaceOp: 'append' })
+        }
+      }
       // The source recorded the user interrupting this turn. DSH states that
       // as the turn's end reason rather than as conversation text, and the
       // cancel cause is exactly what the imported notice described.
