@@ -12,10 +12,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {
   ApiProxy, ClientRequest, RpcId, RpcReceipt, RpcResponse,
+  SessionSummary, WorkspaceView,
 } from '@deepseek-ai/dsh-host-apiproxy'
 import type { ServerRegistry } from './registry.ts'
 import type { ImportStore } from './importer.ts'
-import type { WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
 import { createHash } from 'node:crypto'
 import { normalizePath } from './import-common.ts'
 import { groupingPath } from './importer.ts'
@@ -143,6 +143,14 @@ export class HubGateway {
   private readonly materialized = new Set<string>()
   /** Imported session id → the real session it was promoted to. */
   private readonly promoted = new Map<string, string>()
+  /**
+   * Workspace views this gateway mutated, from the most recent workspace.list
+   * merge (virtual server groups, orphan project groups, official workspaces
+   * that gained imported rows). The tree watcher replays changes over this
+   * set; untouched official views are deliberately absent so stale copies
+   * cannot shadow newer official frames.
+   */
+  private hubViews: WorkspaceView[] = []
 
   async handle(req: IncomingMessage, res: ServerResponse, method: string): Promise<void> {
     if (!isTrustedApiRequest(req, this.trustedHosts)) {
@@ -314,6 +322,12 @@ export class HubGateway {
       return typeof path === 'string' ? [path] : []
     })
     const assignment = this.imports?.assign(officialPaths)
+    const originalSessionCount = new Map(value.items.flatMap(item => {
+      const path = typeof item === 'object' && item !== null ? (item as { path?: unknown }).path : undefined
+      if (typeof path !== 'string') return []
+      const sessionIds = (item as { sessionIds?: unknown }).sessionIds
+      return [[normalizePath(path), Array.isArray(sessionIds) ? sessionIds.length : 0]] as const
+    }))
     const items = value.items.map(item => {
       if (assignment === undefined) return item
       const path = typeof item === 'object' && item !== null ? (item as { path?: unknown }).path : undefined
@@ -325,6 +339,30 @@ export class HubGateway {
         : []
       return { ...item as object, sessionIds: [...sessionIds, ...imported] }
     })
+    const valueItems = [
+      ...items,
+      ...this.virtualWorkspaceViews(),
+      ...importedProjectViews(assignment?.orphansByCwd),
+    ] as WorkspaceView[]
+    // Remember only the views this gateway changed (virtual groups, orphan
+    // project groups, official workspaces that gained imported rows). The
+    // official client owns its own workspace rows; replaying stale copies of
+    // untouched official views could shadow a newer official frame.
+    this.hubViews = valueItems.filter(view => {
+      const path = (view as { path?: unknown }).path
+      if (typeof path !== 'string') return false
+      if (path.startsWith('dsh-hub://')) return false
+      if (typeof (view as { workspaceId?: unknown }).workspaceId === 'string'
+        && (view as { workspaceId: string }).workspaceId.startsWith('imp-ws-')) return false
+      const count = Array.isArray((view as { sessionIds?: unknown }).sessionIds)
+        ? (view as { sessionIds: unknown[] }).sessionIds.length
+        : 0
+      return count > (originalSessionCount.get(normalizePath(path)) ?? 0)
+    })
+    // Official workspace rows gain imported ids at the tail; hooking the
+    // additions back onto the cached official view would be a no-op (the
+    // view already carries them), so this.hubViews instead holds the exact
+    // mutated views the tree watcher must replay.
     return {
       type: 'server-response',
       rpcId,
@@ -332,11 +370,7 @@ export class HubGateway {
         ok: true,
         value: {
           ...value,
-          items: [
-            ...items,
-            ...this.virtualWorkspaceViews(),
-            ...importedProjectViews(assignment?.orphansByCwd),
-          ],
+          items: valueItems,
           archivedSessionIds,
         },
       },
@@ -361,6 +395,19 @@ export class HubGateway {
       createdAt: VIRTUAL_WORKSPACE_EPOCH,
       updatedAt: VIRTUAL_WORKSPACE_EPOCH,
     }))
+  }
+
+  /**
+   * Views carrying hub-managed membership (grows with each workspace.list
+   * merge). Used by the tree frame watcher as its diff baseline.
+   */
+  mergedWorkspaceViews(): WorkspaceView[] {
+    return this.hubViews.length > 0 ? this.hubViews : this.virtualWorkspaceViews()
+  }
+
+  /** Imported session rows, newest first (drives host/session-added frames). */
+  importedSummaries(): SessionSummary[] {
+    return this.imports?.rows() ?? []
   }
 
   /** Search across the local host and every remote server (best effort). */

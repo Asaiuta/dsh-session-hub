@@ -204,18 +204,23 @@ export function apply(ctx: Context, config?: Config): void {
     }, 'dsh-session-hub: /api gateway routes')
   }
 
-  // Virtual-workspace live projection: the official client pulls workspace.list
-  // only once per connection, so remote session drift (added/removed servers,
+  // Tree live projection: the official client pulls workspace.list only once
+  // per connection, so session drift (imported sessions added/removed, remote
   // session create/delete/title) must reach the tree as synthetic host frames
   // over the same SSE bus the bridge consumes. A 1.5s diff watcher publishes
-  // host/workspace-changed (full view) and host/workspace-removed deltas.
-  // Only aggregation mints virtual groups, so this watcher follows it.
-  if (useAggregate && gateway !== undefined) {
+  // host/workspace-changed (full view) and host/workspace-removed deltas over
+  // the views the gateway itself mutated (virtual server groups, orphan
+  // project groups, official workspaces that gained imported rows), and
+  // announces newly imported sessions with host/session-added plus a title
+  // projection so the tree row renders with its real title instead of a
+  // placeholder.
+  if (gateway !== undefined) {
     ctx.effect(() => {
       let last = new Map<string, string>()
+      let lastImported = new Set<string>()
       const timer = setInterval(() => {
-        const views = gateway.virtualWorkspaceViews()
-        const current = new Map(views.map(view => [view.workspaceId, `${view.title}${view.sessionIds.join('')}`]))
+        const views = gateway.mergedWorkspaceViews()
+        const current = new Map(views.map(view => [view.workspaceId, `${view.title}${String.fromCharCode(1)}${view.sessionIds.join(String.fromCharCode(1))}`]))
         for (const view of views) {
           if (last.get(view.workspaceId) !== current.get(view.workspaceId)) {
             registry.events.publish(view.workspaceId as never, 'hub:workspace', {
@@ -230,9 +235,37 @@ export function apply(ctx: Context, config?: Config): void {
           }
         }
         last = current
+        // Imported sessions are not in the official store until their summary
+        // arrives; session.list is only re-pulled on reconnect, so announce
+        // them here. mergeSummary fills missing cwd/agentPreset only and never
+        // overwrites list-loaded projections, and the title projection rides
+        // the same seq-ordered store as real frames (-1 = empty-log baseline).
+        const rows = gateway.importedSummaries()
+        for (const row of rows) {
+          if (lastImported.has(row.sessionId)) continue
+          registry.events.publish('hub' as never, 'hub-import', {
+            type: 'host/session-added',
+            sessionId: row.sessionId,
+            // HostFrame's published type omits blank, but the wire schema
+            // requires it; false = regular session (not a blank placeholder).
+            blank: false,
+            ...row.cwd !== undefined ? { cwd: row.cwd } : {},
+            ...row.agentPreset !== undefined ? { agentPreset: row.agentPreset } : {},
+          } as never)
+          registry.events.publish('hub' as never, 'hub-import', {
+            type: 'session/projection',
+            sessionId: row.sessionId,
+            key: 'title',
+            value: row.projections?.values?.title ?? '',
+            // Wire schema requires seq >= 0; 0 is the lowest legal baseline
+            // and supersedes any -1 seed from the session.list projections.
+            seq: 0,
+          })
+        }
+        lastImported = new Set(rows.map(row => row.sessionId))
       }, 1500)
       return () => clearInterval(timer)
-    }, 'dsh-session-hub: virtual workspace frame watcher')
+    }, 'dsh-session-hub: tree frame watcher')
   }
 
   // Strict endpoint registration: the gateway resolves sessionHub/<method>

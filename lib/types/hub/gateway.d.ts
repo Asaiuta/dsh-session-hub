@@ -10,7 +10,7 @@
  * open, stream, and control remote sessions.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ApiProxy, ClientRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy';
+import type { ApiProxy, ClientRequest, RpcResponse, SessionSummary, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy';
 import type { ServerRegistry } from './registry.ts';
 import type { ImportStore } from './importer.ts';
 import { type SessionStoreFace } from './promote.ts';
@@ -34,6 +34,14 @@ export declare class HubGateway {
     private readonly materialized;
     /** Imported session id → the real session it was promoted to. */
     private readonly promoted;
+    /**
+     * Workspace views this gateway mutated, from the most recent workspace.list
+     * merge (virtual server groups, orphan project groups, official workspaces
+     * that gained imported rows). The tree watcher replays changes over this
+     * set; untouched official views are deliberately absent so stale copies
+     * cannot shadow newer official frames.
+     */
+    private hubViews;
     handle(req: IncomingMessage, res: ServerResponse, method: string): Promise<void>;
     /** Route one unary envelope; always answers a ServerResponse document. */
     dispatch(method: string, envelope: ClientRequest, internal?: boolean): Promise<RpcResponse<unknown>>;
@@ -71,6 +79,13 @@ export declare class HubGateway {
      * official tree stays consistent between cold list and live updates.
      */
     virtualWorkspaceViews(): import('@deepseek-ai/dsh-host-apiproxy').WorkspaceView[];
+    /**
+     * Views carrying hub-managed membership (grows with each workspace.list
+     * merge). Used by the tree frame watcher as its diff baseline.
+     */
+    mergedWorkspaceViews(): WorkspaceView[];
+    /** Imported session rows, newest first (drives host/session-added frames). */
+    importedSummaries(): SessionSummary[];
     /** Search across the local host and every remote server (best effort). */
     private search;
     /**
