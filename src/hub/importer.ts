@@ -20,7 +20,6 @@ import { parseClaudeProject } from './import-claude.ts'
 import { scanOpencode } from './import-opencode.ts'
 import { parsePiSession } from './import-pi.ts'
 import { cleanTurnText, normalizePath, type ImportedSession, type ImportedTurn } from './import-common.ts'
-import { ACTIVE_WINDOW_MS, ImportWatcher } from './import-watch.ts'
 
 /**
  * Per-conversation scratch directories Codex creates under the user's home:
@@ -147,14 +146,14 @@ async function walkFiles(root: string, suffix: string): Promise<string[]> {
  * against `undefined` are always false) and the whole session list stops
  * settling — the sidebar then renders workspace groups with no session rows.
  */
-function toSummary(s: ImportedSession, running = false): SessionSummary {
+function toSummary(s: ImportedSession): SessionSummary {
   // Never emit a non-numeric updatedAt: the official summary requires it, and
   // a parser regression must not be able to break the whole session list.
   const updatedAt = Number.isFinite(s.updatedAt) ? s.updatedAt : 0
   return {
     sessionId: s.sessionId,
     updatedAt,
-    running,
+    running: false,
     blank: false,
     cwd: s.cwd,
     agentPreset: 'standard',
@@ -311,23 +310,10 @@ export class ImportStore {
   private scanning = false
   /** Memoized project-directory existence, keyed by normalized path. */
   private readonly dirCache = new Map<string, boolean>()
-  /** Live-tail watcher, attached by the plugin when the importer is on. */
-  private watcher: ImportWatcher | undefined
-  /** Sessions the most recent opencode scan refreshed (db-backed liveness). */
-  private dbLive = new Set<string>()
 
   constructor(dataFile: string) {
     this.cachePath = dataFile
     this.cache = { files: {}, sessions: [] }
-  }
-
-  /**
-   * Attach the live-tail watcher. Kept out of the constructor so the store
-   * still works (as a plain historical importer) when watching is impossible.
-   * @param watcher - the watcher whose write records drive `running`.
-   */
-  attachWatcher(watcher: ImportWatcher): void {
-    this.watcher = watcher
   }
 
   /**
@@ -488,14 +474,6 @@ export class ImportStore {
         if (this.cache.files[opencodeDb] !== mtime) {
           const sessions = await scanOpencode(opencodeDb)
           if (sessions.length > 0) {
-            // opencode keeps every session in one db file, so a file write
-            // only proves *some* session moved. Attribute liveness per row
-            // by its own updatedAt instead of blaming the whole database.
-            const cutoff = Date.now() - ACTIVE_WINDOW_MS
-            this.dbLive = new Set(
-              sessions.filter(s => Number.isFinite(s.updatedAt) && s.updatedAt >= cutoff)
-                .map(s => s.sessionId),
-            )
             for (const s of sessions) {
               const index = this.cache.sessions.findIndex(x => x.sessionId === s.sessionId)
               if (index >= 0) this.cache.sessions[index] = s
@@ -666,32 +644,7 @@ export class ImportStore {
 
   /** Hub session rows for the merged session.list. */
   rows(): SessionSummary[] {
-    return this.visible().map(s => toSummary(s, this.isLive(s)))
-  }
-
-  /**
-   * Whether this imported session's log is being written to right now.
-   *
-   * Liveness comes from the log file itself, not from the tool: all three
-   * tools append while the conversation is still going, so a recent write is
-   * the only evidence available — and the only one that needs no cooperation
-   * from the tool. Sessions with no `sourceFile` (opencode is db-backed) fall
-   * back to the db-level signal.
-   * @param s - the imported session to test.
-   * @returns true when its log was written within the activity window.
-   */
-  private isLive(s: ImportedSession): boolean {
-    if (this.watcher === undefined) return false
-    const file = s.sourceFile
-    if (file !== undefined) {
-      // Must be a *recent* write, not merely a remembered one: `lastWrite > 0`
-      // means "seen at some point this process", which would pin every row
-      // that ever moved to running for the lifetime of the process.
-      return Date.now() - this.watcher.lastWrite(file) < ACTIVE_WINDOW_MS
-    }
-    // opencode: the db is one file for every session, so a write only proves
-    // *some* session moved. Attribute it to the ones the scan just refreshed.
-    return this.dbLive.has(s.sessionId)
+    return this.visible().map(toSummary)
   }
 
   /**
