@@ -433,6 +433,38 @@ export class HubGateway {
             return { type: 'server-response', rpcId, result: { ok: true, value: { events, hasMore: false } } }
           }
         }
+        // The official composer gates sending on a *successful* session.models
+        // response: the model seat renders the choice from it, and only
+        // routable:false blocks the input. An imported session has no harness
+        // agent, but answering this with the local catalog (llm.models is
+        // host-scoped, no session needed) makes the UI treat it as sendable —
+        // which is exactly what triggers promotion below.
+        if (method === 'session.models') {
+          const catalog = await this.callOfficial('llm.models', rpcId, {})
+          const value = catalog.result.ok && typeof catalog.result.value === 'object'
+            && catalog.result.value !== null
+            ? catalog.result.value as { groups?: Array<{ id: string, models?: Array<{ id: string }> }>, failures?: unknown[] }
+            : undefined
+          const groups = Array.isArray(value?.groups) ? value.groups : []
+          const first = groups.flatMap(group =>
+            (group.models ?? []).map(model => ({ provider: group.id, model: model.id })),
+          )[0]
+          return {
+            type: 'server-response',
+            rpcId,
+            result: {
+              ok: true,
+              value: {
+                current: first ?? { provider: 'unavailable', model: 'unavailable' },
+                // With no local model at all the session cannot be promoted,
+                // so mirror the official semantics and let the composer block.
+                routable: first !== undefined,
+                groups,
+                failures: Array.isArray(value?.failures) ? value.failures : [],
+              },
+            },
+          }
+        }
         // Sending a message is the point where browsing turns into working:
         // promote the log to a real session the harness owns and let the
         // prompt land there, so the user continues the conversation instead
