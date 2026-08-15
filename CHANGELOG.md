@@ -3,7 +3,27 @@
 本文件记录每个发布版本的实际变化。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> Alpha 阶段：`0.1.0-alpha.*` 之间允许破坏性变更，破坏点会在下方逐条写明。
+> Alpha 阶段已结束：自 `0.1.0` 起为正式版本，破坏性变更需随 minor 版本发布。
+
+## [0.1.0] - 2026-08-15
+
+第一个正式版本。功能集合与 `0.1.0-alpha.3` 相同，自 `0.1.0-alpha.2` 以来的
+变更详见下方 alpha.3 条目；此处只列出正式版对外承诺的能力边界。
+
+### 功能总览
+
+- **四功能开关**（`aggregate` / `tunnel` / `modelSync` / `importer`），默认全开；
+  四个全关时插件不拦截任何 `/api`。
+- **多服务器聚合**：每台已配置的远程 DSH 服务器一个虚拟分组；会话历史、发消息、
+  取消、重命名、fork、换模型、审批应答全部走网关路由到所属服务器；SSH 隧道自动托管。
+- **外部会话导入**：Codex CLI / Claude Code / opencode / Pi Coding Agent 的历史
+  只读视图，按项目目录分组；工具调用渲染为真实卡片；勾选 Auto 后 60 秒周期扫描跟进。
+  发消息自动转正为真实 DSH 会话（保留对话与工具历史）。
+- **模型配置增量同步**：只补本机有而远端缺的提供方/默认模型/API Key，不覆盖远端。
+- **自环防护**：拒绝把 hub 指向自己；路由冲突时自动降级而非拖垮 `dsh` 启动。
+
+[0.1.0]: https://github.com/Asaiuta/dsh-session-hub/compare/v0.1.0-alpha.3...v0.1.0
+[0.1.0-alpha.3]: https://github.com/Asaiuta/dsh-session-hub/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 
 ## [0.1.0-alpha.3] - 2026-08-15
 

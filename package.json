@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-hub",
   "description": "Aggregate and natively control DeepSeek Harness sessions across multiple remote dsh web servers from one pane: server registry, merged session list, history, prompt, cancel, rename, fork, model selection and approval/question answering.",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
